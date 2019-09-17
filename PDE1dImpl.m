@@ -1,0 +1,685 @@
+%% Copyright (C) 2016 bgreene
+%% 
+%% Author: bgreene <bgreene@BGREENE-HP>
+%% Created: 2016-01-07
+
+classdef PDE1dImpl < handle
+
+  properties
+     xmesh, tspan;
+		 pdeFunc,icFunc,bcFunc;
+     numDepVars;
+     mCoord;
+     %options;
+     hasODE, odeFunc, odeICFunc, odeMesh, numODE;
+  end
+  
+  methods
+    
+    function obj=PDE1dImpl(m, pdeFunc,icFunc,bcFunc,x,t,opts)
+    if(~isscalar(m) || ~isnumeric(m) || (m ~= 0 && m ~=1 && m ~=2))
+      error(['m must equal 0, 1, or 2 for Cartesian, cylindrical' ...
+     ' or spherical coordinate systems, respectively.']);
+    end
+    obj.mCoord = m;
+    obj.pdeFunc = pdeFunc;
+		obj.icFunc = icFunc;
+		obj.bcFunc = bcFunc;
+		obj.xmesh = x;
+    obj.numNodes = length(x);
+		obj.tspan = t;
+    if ~isa(opts, 'PDEOptions')
+      error('Argument seven must be a PDEOPtions instance.');
+    end
+    obj.intRule = GaussianIntegrationRule(GaussianIntegrationRule.Curve, ...
+      opts.numIntegrationPoints);
+    ic1 = icFunc(x(1));
+    obj.numDepVars = length(ic1);
+    obj.numElemNodes = 2;
+    obj.numFEMEqns = obj.numNodes*obj.numDepVars;
+    obj.totalNumEqns = obj.numFEMEqns;
+    obj.hasODE = opts.hasODE;
+    obj.numODE = 0;
+    obj.addLagMultVector = opts.addLagMultVector;
+    obj.useDiagMassMat = opts.useDiagMassMat;
+    obj.vectorized = opts.vectorized;
+    obj.numIntegrationPoints = opts.numIntegrationPoints;
+    obj.icDiagnostics = opts.icDiagnostics;
+    obj.eqnDiagnostics = opts.eqnDiagnostics;
+    obj.analyticalJacobian = opts.analyticalJacobian;
+
+    obj.y0FEM = zeros(obj.numDepVars, obj.numNodes);
+    for i=1:obj.numNodes
+      obj.y0FEM(:,i) = icFunc(x(i));
+    end
+    
+    ne = obj.numNodes-1;
+    numXpts = ne*obj.numIntegrationPoints;
+    % calc xpts for the mesh
+    gPts = obj.intRule.points;
+    N = obj.shapeLine2(gPts);
+    x = obj.xmesh;
+    ip = 1:obj.numIntegrationPoints:numXpts;
+    for i=1:obj.numIntegrationPoints
+      obj.xPts(ip) = x(1:end-1)*N(1,i) + x(2:end)*N(2,i);
+      ip = ip + 1;
+    end
+    
+    obj.isOctave = exist('OCTAVE_VERSION', 'builtin');
+    
+    end
+    
+    function setODE(self, odeFunc, odeICFunc, odeMesh)
+      self.odeFunc = odeFunc;
+      self.odeICFunc = odeICFunc;
+      self.odeMesh = odeMesh;
+      self.meshMapper = PDEMeshMapper(self.xmesh, odeMesh);
+      self.y0Ode = self.odeICFunc();
+      self.numODE = length(self.y0Ode);
+      self.totalNumEqns = self.numFEMEqns + self.numODE;
+    end
+		
+		function [outTimes,u,varargout]=solveTransient(self, odeOpts)
+      
+      reltol=odeOpts.RelTol;
+      abstol=odeOpts.AbsTol;
+      % flag dirichlet contraints
+      xl = self.xmesh(1);
+      xr = self.xmesh(end);
+      ul = self.y0FEM(:,1);
+      ur = self.y0FEM(:,end);
+      t0 = self.tspan(1);
+      if(self.hasODE)      
+        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0,self.y0Ode,...
+          zeros(self.numODE,1));
+      else
+        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0);
+      end
+      self.dirConsFlagsLeft = ql~=0;
+      self.dirConsFlagsRight = qr~=0;
+      %fprintf('numDepVars=%d\n', obj.numDepVars);
+      %prtShortVec(obj.y0, 'y0');
+      
+      massFunc = @(time, u, up) self.calcMassMat(time, u, up);
+      rhsFunc = @(time, u, up) self.calcRHSODE(time, u, up);
+      %opts=odeset('reltol', reltol, 'abstol', abstol);
+      %opts=odeset(opts, 'Stats','on');
+      opts=odeset(odeOpts);
+      icdiag = self.icDiagnostics;
+      y0 = [self.y0FEM(:); self.y0Ode];
+      useDecic=true;
+      useOde15i=true;
+      if(useOde15i)
+        useDecic = true;
+      end
+      if(useDecic)
+        %icf = @(t,y,yp) massFunc(t,y,yp)*yp-rhsFunc(t,y,yp);
+        depVarClassType=y0;
+        icf = @(t,y,yp) self.calcResidual(t,y,yp,depVarClassType);
+        t0 = self.tspan(1);
+        n=length(y0);
+        %fixed_y0 = ones(n,1);
+        %fixed_y0 = [ones(n-1,1);0];
+        %fixed_y0 = [0; ones(n-1,1)];
+        fixed_y0 = zeros(n,1);
+        %fixed_y0 = [ones(self.numFEMEqns,1);zeros(self.numODE,1)];
+        yp0 = zeros(n,1);
+        %icf(0,y0,yp0)'
+        fixed_yp0 = zeros(n,1);
+        icopts.AbsTol=1e-16;
+        icopts.RelTol=1e-4;
+        icopts.icdiagnostics=icdiag;
+        y0Save = y0;
+        if(0)
+          [y0,yp0]=decic(icf, t0,y0,fixed_y0,yp0,fixed_yp0);
+        else
+          [y0,yp0]=decicShampine(icf, t0,y0,fixed_y0,yp0,fixed_yp0,icopts);
+        end
+        if(icdiag)
+          fprintf('max change, y0=%g\n', max(abs(y0-y0Save)));
+          prtShortVec(y0, 'y0');
+          prtShortVec(yp0, 'yp0', 1, '%16.10g');
+        end
+        opts=odeset(opts,'initialslope', yp0);
+        if(icdiag)
+          prtShortVec(icf(t0,y0,yp0), 'res');
+        end
+      end
+      
+      abstolVec=abstol*ones(self.totalNumEqns,1);
+      % use large convergence tolerance on algebraic eqns
+      M= self.calcMassMat(t0, y0, yp0);
+      algEqns = abs(diag(M))<eps;
+      abstolVec(algEqns) = 1e5*abstol;
+      %prtShortVec(abstolVec, 'abstolVec');
+      opts=odeset(opts, 'abstol', abstolVec);
+      %opts=odeset(opts, 'Stats','on');
+      if(self.analyticalJacobian)
+        %disp('Using MatlabAutoDiff for Jacobian Evaluations');
+        jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
+        opts=odeset(opts, 'jacobian', jacFunc);
+      elseif(~self.isOctave)
+        % octave ode15i doesn't have JPattern option
+        jPat = self.calcJacPattern;
+        opts=odeset(opts, 'jpattern', {jPat, jPat});
+      end
+      
+      if(useOde15i)
+        [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
+      else
+        opts=odeset(opts, 'Mass', massFunc);
+        [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
+      end
+      if(self.hasODE)
+        uODE = u(:,end-self.numODE+1:end);
+        varargout{1} = uODE;
+        u= u(:,1:self.numFEMEqns);
+      end
+    end
+    
+    function testODECalc(self)
+      mOde = self.numODE;
+      ne = self.numFEMEqns + mOde;
+      u = linspace(2,10,ne);
+      up = linspace(-2,-4,ne);
+      u=0:ne;
+      up=u;
+      v=u(end-mOde:end);
+      vDot=up(end-mOde:end);
+      [F, S,Cv] = calcFEMEqns(self, 0, u, up, v, vDot);
+      prtShortVec(F, 'F');
+      prtShortVec(Cv, 'Cxd');
+      R = Cv - S + F;
+      prtShortVec(R, 'R');
+      f=self.calcODEResidual(0, u, up, F)
+      dFdu=calcDOdeDu(self, 0, u, up, F)
+    end
+    
+    function testFuncs(self)
+      ne = self.totalNumEqns;
+      %u = zeros(ne, 1);
+      u=[self.y0FEM(:); self.y0Ode];
+      up = zeros(ne, 1);
+      for i=1:ne
+        %u(i) = i - 1;
+        up(i) = i-1;
+      end
+      self.printSystemVector(u, 'u');
+      self.printSystemVector(up, 'up');
+     if (self.numODE)
+        odeIndices = ne-self.numODE+1:ne;
+        v = u(odeIndices);
+        vDot = up(odeIndices);
+        uFEM = u(1:self.numFEMEqns);
+        upFEM = up(1:self.numFEMEqns);
+      else
+        v = [];
+        vDot = [];
+        uFEM = u;
+        upFEM = up;
+     end
+     analJac = self.analyticalJacobian;
+     if(analJac && self.eqnDiagnostics<1)
+       autoDiffF = @(u) self.calcResidual(0, u, up, u);
+       for i=1:10
+         kAD = AutoDiffJacobianAutoDiff(autoDiffF, u);
+       end
+       size(kAD)
+       return
+     end
+      depVarClassType=u;
+      [F, S,Cxd] = calcFEMEqns(self, 0, uFEM, upFEM, v, vDot, depVarClassType);
+      self.printSystemVector(S, 'S');
+      self.printSystemVector(F, 'F');
+      self.printSystemVector(Cxd, 'Cxd');
+      if(self.eqnDiagnostics>1)
+        K = self.calcJacobian(0, u, up);
+        prtMat(K, 'K', 1, '%13g');
+        M = self.calcMassMat(0, u, up);
+        prtMat(M, 'M', 1, '%13g');
+        Mup = M*up;
+        prtShortVec(Mup', 'Mup');
+        jPattern = self.calcJacPattern;
+        prtMat(full(jPattern), 'jPattern', 1, ' %g');
+        if(analJac)
+          autoDiffF = @(u) self.calcResidual(0, u, up, u);
+          kAD = AutoDiffJacobianAutoDiff(autoDiffF, u);
+          prtMat(kAD, 'kAD', 1, '%13g');
+        end
+      end
+      R = self.calcResidual(0, u, up, depVarClassType);
+      self.printSystemVector(R, 'R');
+      if(self.numODE)
+        [dFdv,dFdvDot]=calcDOdeDv(self, 0, u, up, F);
+        prtMat(dFdv, 'dFdv', 1, '%10g');
+        prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
+      end
+    end
+
+  end % methods
+	
+	methods(Access=private)
+
+    function jac=calcJacobian(self, time, u, up)
+      u=u(:);
+      up=up(:);
+      ne = length(u);
+      jac = zeros(ne,ne);
+      depVarClassType=u;
+      r0 = calcResidual(self, time, u, up, depVarClassType);
+      sqrtEps = sqrt(eps);
+      for i=1:ne
+        usave = u(i);
+        h = sqrtEps * max(usave, 1);
+        u(i) = u(i) + h;
+        rp = calcResidual(self, time, u, up, depVarClassType);      
+        jac(:,i) = (rp-r0)/h;     
+        u(i) = usave;
+      end
+    end
+    
+    function jac=calcJacobianCD(self, time, u)
+      jac = zeros(self.numFEMEqns, self.numFEMEqns);
+      disp('calc dFdu by central difference');
+      depVarClassType=u;
+      for i=1:self.numFEMEqns
+        usave = u(i);
+        delta = 1e-4;
+        u(i) = u(i) + delta;
+        rp = calcRHSODE(self, time, u, depVarClassType);
+        u(i) = usave;
+        u(i) = u(i) - delta;
+        rm = calcRHSODE(self, time, u, depVarClassType);
+        jac(:,i) = (rp-rm)/(2*delta);
+        u(i) = usave;
+      end
+    end
+    
+    function M=calcMassMat(self, time, u, up)
+      u=u(:);
+      up=up(:);
+      ne = length(u);
+      M = zeros(ne,ne);
+      depVarClassType=up;
+      r0 = calcResidual(self, time, u, up, depVarClassType);
+      sqrtEps = sqrt(eps);
+      for i=1:ne
+        upsave = up(i);
+        h = sqrtEps * max(upsave, 1);
+        up(i) = up(i) + h;
+        rp = calcResidual(self, time, u, up, depVarClassType);      
+        M(:,i) = (rp-r0)/h;     
+        up(i) = upsave;
+      end
+    end
+   
+    function R = calcRHSODEX(self, time, u, up)
+      % this function was used by ode15s
+       if (self.numODE)
+        ne = self.totalNumEquations;
+        odeIndices = ne-self.numODE+1:ne;
+        v = u(odeIndices);
+        vDot = up(odeIndices);
+        uFEM = u(1:self.numFEMEquations);
+        upFEM = up(1:self.numFEMEquations);
+      else
+        v = [];
+        vDot = [];
+        uFEM = u;
+        upFEM = up;
+      end
+      [F, S] = calcFEMEqns(self, time, u, up, v, vDot);
+      R = F - S;  
+      % add constraints
+      R=self.applyConstraints(R,u,v,vDot,time);
+    end 
+    
+    function R = calcResidual(self, time, u, up, depVarClassType)
+      [rhs,Cxd] = calcRHSODE(self, time, u, up, depVarClassType);
+      R = Cxd+rhs;
+    end
+    
+    function [R,Cxd] = calcRHSODE(self, time, u, up, depVarClassType)
+      nOde = self.numODE;
+     if (nOde)
+        ne = self.totalNumEqns;
+        odeIndices = ne-nOde+1:ne;
+        v = u(odeIndices);
+        vDot = up(odeIndices);
+        uFEM = u(1:self.numFEMEqns);
+        upFEM = up(1:self.numFEMEqns);
+      else
+        v = [];
+        vDot = [];
+        uFEM = u;
+        upFEM = up;
+      end
+      [F, S,Cxd] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
+      R = F-S;
+      %R = Cxd-R;
+      %R=-R;
+      if (nOde)
+        f=calcODEResidual(self, time, u, up, F);
+        if(self.addLagMultVector)
+          dFdu=calcDOdeDu(self, time, u, up, F);
+          R = R - dFdu'*v; % add constraint contribution
+        end
+        R=[R;f];
+        Cxd=[Cxd; zeros(nOde,1)];
+      end
+      % add constraints
+      [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
+      R=-R;
+    end 
+    function f=calcODEResidual(self, time, u, up, F)
+      m = self.numODE-1;
+      v = u(end-m:end);
+      vDot = up(end-m:end);
+      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
+      f2 = reshape(F, self.numDepVars, []);
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      upOde=mm.mapFunction(up2);
+      dudxOde=mm.mapFunctionDer(u2);
+      fluxOde = mm.mapFunction(f2);
+      dupdxOde=mm.mapFunctionDer(up2);
+      f = self.callVarargFunc(self.odeFunc, ...
+        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+        1);
+    end
+    
+    function [dfdy, dfdyp]=calcAnalJacobianODE(self, time, u, up)
+      autoDiffF = @(u) self.calcResidual(time, u, up, u);
+      dfdy = AutoDiffJacobianAutoDiff(autoDiffF, u);
+      autoDiffF = @(up) self.calcResidual(time, u, up, up);
+      dfdyp = AutoDiffJacobianAutoDiff(autoDiffF, up);
+    end
+    
+    function [R,Cxd]=applyConstraints(self, R, Cxd, u,v, vDot,time)
+      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      x = self.xmesh;
+      xl = x(1);
+      xr = x(end);
+      %[pl,ql,pr,qr] = self.bcFunc(x(1), u2(:,1),x(end),u2(:,end),time);
+      [pl,ql,pr,qr] = self.callVarargFunc(self.bcFunc, ...
+        {xl, u2(:,1),xr,u2(:,end),time,v, vDot}, 4);
+      rightDofOff = self.numFEMEqns - self.numDepVars;
+      m=self.mCoord;
+      sing = m~=0 && xl==0;
+      for i=1:self.numDepVars
+        if(ql(i) ~= 0)
+          qli = ql(i);
+          if ~sing
+            if (m == 1)
+              qli = qli/xl;
+            elseif(m==2)
+              qli = qli/(xl*xl);
+            end
+          end
+          R(i) =  R(i) - pl(i)/qli;
+        else
+          % apply dirichlet constraint
+          R(i) = -pl(i);
+          Cxd(i) = 0;
+        end
+        if(qr(i) ~= 0)
+          qri = qr(i);
+          if (m == 1)
+            qri = qri/xr;
+          elseif(m==2)
+            qri = qri/(xr*xr);
+          end
+          R(i+rightDofOff) = R(i+rightDofOff) + pr(i)/qri;
+        else
+          % apply dirichlet constraint using lagrange multiplier
+         R(i+rightDofOff) = -pr(i);
+         Cxd(i+rightDofOff) = 0;
+       end
+     end
+     %R = -F + S;
+     R = -R;
+    end
+    
+    function [F, S, Cv] = calcFEMEqns(self, t, u,up, v, vDot, depVarClassType)
+      ndv=self.numDepVars;
+      nn  = self.numNodes;
+      Cv = zerosLike(ndv, nn, depVarClassType);
+      F = zerosLike(ndv, nn, depVarClassType);
+      S = zerosLike(ndv, nn, depVarClassType);
+      
+      gPts = self.intRule.points;
+      gWts = self.intRule.wts;
+      numIntPts = length(gPts);
+      N = self.shapeLine2(gPts);
+      dN = self.dShapeLine2(gPts);
+      x = self.xmesh;  
+      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
+			numXpts = size(self.xPts,2);
+      jac = diff(x)/2;
+      nen=self.numElemNodes;
+      NN = zeros(nen, nen, numIntPts);
+      u21 = u2(:,1:end-1);
+      u22 = u2(:,2:end);
+      uPts = zerosLike(ndv, numXpts,  depVarClassType);
+      duPts = zerosLike(ndv, numXpts, depVarClassType);
+      ip = 1:numIntPts:numXpts;
+      for i=1:numIntPts
+        NN(:,:,i) = N(:,i)*N(:,i)';
+        % assume two node elements
+        uPts(:,ip) = u21*N(1,i) + u22*N(2,i);
+        duPts(:,ip) = u21*dN(1,i)./jac + u22*dN(2,i)./jac;
+        ip = ip + 1;
+      end
+      if(self.vectorized)
+        % call pde func for all points
+        [c,f,s] = self.callVarargFunc(self.pdeFunc, ...
+          {self.xPts,t,uPts,duPts,v, vDot}, 3);
+        self.checkCoefficientMatrixSize(c, 'c');
+        self.checkCoefficientMatrixSize(f, 'f');
+        self.checkCoefficientMatrixSize(s, 's');
+        %prtMat(s, 's');
+      else
+        c = zerosLike(ndv, numXpts, depVarClassType);
+        f = zerosLike(ndv, numXpts, depVarClassType);
+        s = zerosLike(ndv, numXpts, depVarClassType);
+        for i=1:size(self.xPts,2)
+          [c(:,i),f(:,i),s(:,i)] = ...
+            self.callVarargFunc(self.pdeFunc, ...
+            {self.xPts(i),t,uPts(:,i),duPts(:,i),v, vDot}, 3);
+        end
+      end
+      if(all(c==0))
+        error('pde1d:no_parabolic_eqn', ...
+          "At least one of the entries in the c-coefficient vector must be non-zero.");
+      end
+      
+      % form global vectors
+      m = self.mCoord;
+      if(m==1)
+        xm = self.xPts;
+      elseif(m==2)
+        xm = self.xPts.*self.xPts;
+      end
+      if m> 0
+        c = c.*xm;
+        f = f.*xm;
+        s = s.*xm;
+      end
+      useDiagMM = self.useDiagMassMat;
+      e1 = 1:nn-1;
+      e2 = 2:nn;
+      ip = 1:numIntPts:numXpts;
+      for i=1:numIntPts
+        dNdx = dN(:,i)./jac;
+        fipJac = f(:, ip).*jac*gWts(i);
+        F(:,e1) = F(:,e1) + dNdx(1,:).*fipJac;
+        F(:,e2) = F(:,e2) + dNdx(2,:).*fipJac;
+        sipJac = s(:, ip).*jac*gWts(i);
+        S(:,e1) = S(:,e1) + N(1,i)*sipJac;
+        S(:,e2) = S(:,e2) + N(2,i)*sipJac;
+        cipJac = c(:, ip).*jac*gWts(i);
+        if(useDiagMM)
+          Cv(:,e1) = Cv(:,e1) + up2(:,e1).*cipJac/self.numElemNodes;
+          Cv(:,e2) = Cv(:,e2) + up2(:,e2).*cipJac/self.numElemNodes;
+        else
+          Cv(:,e1) = Cv(:,e1) + (NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2)).*cipJac;
+          Cv(:,e2) = Cv(:,e2) + (NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2)).*cipJac;
+        end
+      ip = ip + 1;
+      end
+      F=F(:);
+      S=S(:);
+      Cv=Cv(:);
+    end
+     
+    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u, up, F)
+      mOde = self.numODE;
+      v = u(end-mOde+1:end);
+      vDot = up(end-mOde+1:end);
+      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
+      f2 = reshape(F, self.numDepVars, []);
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      upOde=mm.mapFunction(up2);
+      dudxOde=mm.mapFunctionDer(u2);
+      fluxOde = mm.mapFunction(f2);
+      dupdxOde=mm.mapFunctionDer(up2);
+      f0 = self.callVarargFunc(self.odeFunc, ...
+        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+        1);
+      sqrtEps = sqrt(eps);
+      dFdv = zeros(mOde, mOde);
+      for i=1:mOde
+        vSave = v(i);
+        h = sqrtEps * max(vSave, 1);
+        v(i) = v(i) + h;
+        fp = self.callVarargFunc(self.odeFunc, ...
+          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+          1);
+        dFdv(:,i) = (fp-f0)/h;
+        v(i) = vSave;
+      end
+      dFdvDot = zeros(mOde, mOde);
+      for i=1:mOde
+        vDotSave = vDot(i);
+        h = sqrtEps * max(vDotSave, 1);
+        vDot(i) = vDot(i) + h;
+        fp = self.callVarargFunc(self.odeFunc, ...
+          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+          1);
+        dFdvDot(:,i) = (fp-f0)/h;
+        vDot(i) = vDotSave;
+      end
+    end
+    
+    function dFdu=calcDOdeDu(self, time, u, up, F)
+      m = self.numODE-1;
+      v = u(end-m:end);
+      vDot = up(end-m:end);
+      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
+      f2 = reshape(F, self.numDepVars, []);
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      upOde=mm.mapFunction(up2);
+      dudxOde=mm.mapFunctionDer(u2);
+      fluxOde = mm.mapFunction(f2);
+      dupdxOde=mm.mapFunctionDer(up2);
+      f0 = self.callVarargFunc(self.odeFunc, ...
+        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+        1);
+      sqrtEps = sqrt(eps);
+      dFdu = zerosLike(self.numODE, self.numDepVars, self.numNodes, u);
+      for i=1:self.numNodes
+        for j=1:self.numDepVars
+        usave = u2(j,i);
+        h = sqrtEps * max(usave, 1);
+        u2(j,i) = u2(j,i) + h;
+        uOde=mm.mapFunction(u2);
+        dudxOde=mm.mapFunctionDer(u2);
+        f = self.callVarargFunc(self.odeFunc, ...
+          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+          1);
+        dFdu(:,j,i) = (f-f0)/h;
+        u2(j,i) = usave;
+        end
+      end
+      dFdu = reshape(dFdu, self.numODE, self.numFEMEqns);
+    end
+    
+    function printSystemVector(self, v, name)
+      if (~self.numODE)
+        m = reshape(v, self.numDepVars, []);
+        prtMat(m, name);
+      else
+        prtShortVec(v, name);
+      end
+    end
+    
+    function checkCoefficientMatrixSize(self, coeffs, coeffsName)
+      numXpts = size(self.xPts,2);
+      reqSize=[self.numDepVars, numXpts];
+      sc = size(coeffs);
+      if any(sc ~= reqSize)
+        fName = func2str(self.pdeFunc);
+        error('pde1d:coeffSize', ['The \"%s\" coefficient matrix ' ...
+          'returned from from function \"%s\"\nhas size %d x %d but the ' ...
+          'expected size is %d x %d.'], coeffsName, fName, ...
+          sc(1), sc(2), reqSize(1), reqSize(2));
+      end
+    end
+    
+    function J=calcJacPattern(self)
+      ndv = self.numDepVars;
+      nn = self.numNodes;
+      % jacobian is block-tridiagonal with the block size equal numDepVars
+      J = kron( spdiags(ones(nn,3),[-1 0 1],nn,nn), ones(ndv,ndv));
+      
+      % odes may couple with any other vars
+      if(self.numODE)
+        J21 = ones(self.numODE, self.numFEMEqns);
+        J22 = ones(self.numODE, self.numODE);
+        J = [J   J21'
+          J21 J22];
+      end
+    end
+    
+	end % methods
+  
+  methods(Access=private, Static)
+    
+    function shp = shapeLine2( r )
+      shp = [(1-r)/2 (1+r)/2]';
+    end
+    
+    function ds = dShapeLine2( r )
+      ds = [-.5 .5]'*ones(1,length(r));
+    end
+    
+    function varargout=callVarargFunc(func, args, nout)
+      [varargout{1:nout}]=func(args{1:nargin(func)});
+    end
+    
+  end % methods
+  
+  properties(Access=private)
+    isOctave;
+    intRule;
+    numNodes, numElemNodes;
+    numFEMEqns, totalNumEqns;
+    numIntegrationPoints;
+    dirConsFlagsLeft, dirConsFlagsRight;
+    meshMapper;
+    y0FEM, y0Ode;
+    addLagMultVector;
+    useDiagMassMat;
+    vectorized;
+    icDiagnostics, eqnDiagnostics, analyticalJacobian;
+    % temporary arrays for vectorized mode
+    xPts;
+  end
+   
+end % classdef
