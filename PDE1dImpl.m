@@ -489,18 +489,34 @@ classdef PDE1dImpl < handle
         % call pde func for all points
         [c,f,s] = self.callVarargFunc(self.pdeFunc, ...
           {self.xPts,t,uPts,duPts,v, vDot}, 3);
-        self.checkCoefficientMatrixSize(c, 'c');
-        self.checkCoefficientMatrixSize(f, 'f');
-        self.checkCoefficientMatrixSize(s, 's');
+        isFullCMat=self.checkCCoefficientMatrixSizeVec(c);
+        self.checkCoefficientMatrixSizeVec(f, 'f');
+        self.checkCoefficientMatrixSizeVec(s, 's');
         %prtMat(s, 's');
       else
-        c = zerosLike(ndv, numXpts, depVarClassType);
         f = zerosLike(ndv, numXpts, depVarClassType);
         s = zerosLike(ndv, numXpts, depVarClassType);
         for i=1:size(self.xPts,2)
-          [c(:,i),f(:,i),s(:,i)] = ...
+          [ci,fi,si] = ...
             self.callVarargFunc(self.pdeFunc, ...
             {self.xPts(i),t,uPts(:,i),duPts(:,i),v, vDot}, 3);
+        isFullCMat=self.checkCCoefficientMatrixSize(ci);
+        self.checkCoefficientMatrixSize(fi, 'f');
+        self.checkCoefficientMatrixSize(si, 's');
+        f(:,i) = fi;
+        s(:,i) = si;
+        if i==1
+          if isFullCMat
+            c = zerosLike(ndv, ndv, numXpts, depVarClassType);
+          else
+            c = zerosLike(ndv, numXpts, depVarClassType);
+          end
+        end
+          if isFullCMat
+            c(:,:,i) = ci;
+          else
+            c(:,i) = ci;
+          end
         end
       end
       if(all(c==0))
@@ -516,7 +532,11 @@ classdef PDE1dImpl < handle
         xm = self.xPts.*self.xPts;
       end
       if m> 0
-        c = c.*xm;
+        if ~isFullCMat
+          c = c.*xm;
+        else
+          c = c.*reshape(xm,1,1,[]);
+        end
         f = f.*xm;
         s = s.*xm;
       end
@@ -532,13 +552,24 @@ classdef PDE1dImpl < handle
         sipJac = s(:, ip).*jac*gWts(i);
         S(:,e1) = S(:,e1) + N(1,i)*sipJac;
         S(:,e2) = S(:,e2) + N(2,i)*sipJac;
-        cipJac = c(:, ip).*jac*gWts(i);
+        if isFullCMat
+          cipJacFull = c(:,:,ip).*(reshape(jac,1,1,[])*gWts(i));
+        else
+          cipJac = c(:, ip).*jac*gWts(i);
+        end
         if(useDiagMM)
           Cv(:,e1) = Cv(:,e1) + up2(:,e1).*cipJac/self.numElemNodes;
           Cv(:,e2) = Cv(:,e2) + up2(:,e2).*cipJac/self.numElemNodes;
         else
-          Cv(:,e1) = Cv(:,e1) + (NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2)).*cipJac;
-          Cv(:,e2) = Cv(:,e2) + (NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2)).*cipJac;
+          if ~isFullCMat
+            Cv(:,e1) = Cv(:,e1) + (NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2)).*cipJac;
+            Cv(:,e2) = Cv(:,e2) + (NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2)).*cipJac;
+          else
+            upie1 = reshape(NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2),ndv,1,[]);
+            upie2 = reshape(NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2),ndv,1,[]);
+            Cv(:,e1) = Cv(:,e1) + reshape(multiprod(cipJacFull, upie1),ndv,[]);
+            Cv(:,e2) = Cv(:,e2) + reshape(multiprod(cipJacFull, upie2),ndv,[]);
+          end
         end
       ip = ip + 1;
       end
@@ -608,16 +639,16 @@ classdef PDE1dImpl < handle
       dFdu = zerosLike(self.numODE, self.numDepVars, self.numNodes, u);
       for i=1:self.numNodes
         for j=1:self.numDepVars
-        usave = u2(j,i);
-        h = sqrtEps * max(usave, 1);
-        u2(j,i) = u2(j,i) + h;
-        uOde=mm.mapFunction(u2);
-        dudxOde=mm.mapFunctionDer(u2);
-        f = self.callVarargFunc(self.odeFunc, ...
-          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-          1);
-        dFdu(:,j,i) = (f-f0)/h;
-        u2(j,i) = usave;
+          usave = u2(j,i);
+          h = sqrtEps * max(usave, 1);
+          u2(j,i) = u2(j,i) + h;
+          uOde=mm.mapFunction(u2);
+          dudxOde=mm.mapFunctionDer(u2);
+          f = self.callVarargFunc(self.odeFunc, ...
+            {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
+            1);
+          dFdu(:,j,i) = (f-f0)/h;
+          u2(j,i) = usave;
         end
       end
       dFdu = reshape(dFdu, self.numODE, self.numFEMEqns);
@@ -633,6 +664,43 @@ classdef PDE1dImpl < handle
     end
     
     function checkCoefficientMatrixSize(self, coeffs, coeffsName)
+      reqSize=[self.numDepVars, 1];
+      sc = size(coeffs);
+      % in non-vec mode, allow row or comumn vector
+      if length(coeffs) ~= self.numDepVars
+        fName = func2str(self.pdeFunc);
+        error('pde1d:coeffSize', ['The \"%s\" coefficient matrix ' ...
+          'returned from from function \"%s\"\nhas size %d x %d but the ' ...
+          'expected size is %d x %d.'], coeffsName, fName, ...
+          sc(1), sc(2), reqSize(1), reqSize(2));
+      end
+    end
+    
+    function isFullCMat=checkCCoefficientMatrixSize(self, c)
+      ndv = self.numDepVars;
+      sc = size(c);
+      if ~ismatrix(c)
+        fName = func2str(self.pdeFunc);
+        emsg=sprintf(['The \"c\" coefficient matrix ' ...
+          'returned from from function \"%s\"\nhas ' ...
+          'an incorrect number of dimensions'], fName);
+        error('pde1d:coeffSize', emsg);
+      end
+      if isvector(c) && length(c)==ndv
+        isFullCMat=false;
+      elseif all(sc == [ndv, ndv])
+        isFullCMat=true;
+      else
+        fName = func2str(self.pdeFunc);
+        emsg=sprintf(['The \"c\" coefficient matrix ' ...
+          'returned from from function \"%s\"\nhas '], fName);
+        emsg=sprintf([emsg 'size %d x %d but the ' ...
+          'expected size is %d x 1.'], sc(1), sc(2), ndv);
+        error('pde1d:coeffSize', emsg);
+      end
+    end
+
+    function checkCoefficientMatrixSizeVec(self, coeffs, coeffsName)
       numXpts = size(self.xPts,2);
       reqSize=[self.numDepVars, numXpts];
       sc = size(coeffs);
@@ -642,6 +710,32 @@ classdef PDE1dImpl < handle
           'returned from from function \"%s\"\nhas size %d x %d but the ' ...
           'expected size is %d x %d.'], coeffsName, fName, ...
           sc(1), sc(2), reqSize(1), reqSize(2));
+      end
+    end
+    
+    function isFullCMat=checkCCoefficientMatrixSizeVec(self, coeffs)
+      numXpts = size(self.xPts,2);
+      ndv = self.numDepVars;
+      sc = size(coeffs);
+      dimsc = ndims(coeffs);
+      if dimsc==2 && all(sc == [ndv, numXpts])
+        isFullCMat=false;
+      elseif dimsc==3 && all(sc == [ndv, ndv, numXpts])
+        isFullCMat=true;
+      else
+        fName = func2str(self.pdeFunc);
+        emsg=sprintf(['The \"c\" coefficient matrix ' ...
+          'returned from from function \"%s\"\nhas '], fName);
+        if dimsc == 2
+          emsg=sprintf([emsg 'size %d x %d but the ' ...
+            'expected size is %d x %d.'], sc(1), sc(2), ndv, numXpts);
+        elseif dimsc==3
+          emsg=sprintf([emsg 'size %d x %d x %d but the ' ...
+            'expected size is %d x %d x %d.'], sc(1), sc(2), sc(3), ndv, ndv, numXpts);
+        else
+          emsg=[emsg 'an incorrect number of dimensions.'];
+        end         
+        error('pde1d:coeffSize', emsg);
       end
     end
     
@@ -673,6 +767,13 @@ classdef PDE1dImpl < handle
     end
     
     function varargout=callVarargFunc(func, args, nout)
+      numExpectedArgs=nargin(func);
+      if numExpectedArgs>length(args)
+        fn = func2str(func);
+        error(['Function \"' fn '\" is expecting %d arguments but is being called with' ...
+          ' only %d arguments.'], numExpectedArgs, length(args));
+      end
+      tmp=func(args{1:numExpectedArgs});
       [varargout{1:nout}]=func(args{1:nargin(func)});
     end
     
