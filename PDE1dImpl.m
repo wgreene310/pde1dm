@@ -44,6 +44,7 @@ classdef PDE1dImpl < handle
     if ~isa(opts, 'PDEOptions')
       error('Argument seven must be a PDEOPtions instance.');
     end
+    obj.pdeOpts = opts;
     obj.intRule = GaussianIntegrationRule(GaussianIntegrationRule.Curve, ...
       opts.numIntegrationPoints);
     ic1 = icFunc(x(1));
@@ -92,7 +93,7 @@ classdef PDE1dImpl < handle
       self.totalNumEqns = self.numFEMEqns + self.numODE;
     end
 		
-		function [outTimes,u,varargout]=solveTransient(self, odeOpts)
+    function [outTimes,u,varargout]=solveTransient(self, odeOpts)
       
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;
@@ -102,7 +103,7 @@ classdef PDE1dImpl < handle
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
-      if(self.hasODE)      
+      if(self.hasODE)
         [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0,self.y0Ode,...
           zeros(self.numODE,1));
       else
@@ -139,7 +140,7 @@ classdef PDE1dImpl < handle
         yp0 = zeros(n,1);
         %icf(0,y0,yp0)'
         fixed_yp0 = zeros(n,1);
-        icopts.AbsTol=1e-16;
+        icopts.AbsTol=1e-7;
         icopts.RelTol=1e-4;
         icopts.icdiagnostics=icdiag;
         y0Save = y0;
@@ -166,7 +167,6 @@ classdef PDE1dImpl < handle
       abstolVec(algEqns) = 1e5*abstol;
       %prtShortVec(abstolVec, 'abstolVec');
       opts=odeset(opts, 'abstol', abstolVec);
-      %opts=odeset(opts, 'Stats','on');
       if(self.analyticalJacobian)
         %disp('Using MatlabAutoDiff for Jacobian Evaluations');
         jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
@@ -178,6 +178,7 @@ classdef PDE1dImpl < handle
       end
       
       if(useOde15i)
+        %sol=ode15i(icf, self.tspan, y0, yp0, opts);
         [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
       else
         opts=odeset(opts, 'Mass', massFunc);
@@ -188,6 +189,84 @@ classdef PDE1dImpl < handle
         varargout{1} = uODE;
         u= u(:,1:self.numFEMEqns);
       end
+    end
+    
+    function [u,varargout]=solveStatic(self, odeOpts)
+      
+      reltol=odeOpts.RelTol;
+      abstol=odeOpts.AbsTol;
+      tol=1e-12;
+      % flag dirichlet contraints
+      xl = self.xmesh(1);
+      xr = self.xmesh(end);
+      ul = self.y0FEM(:,1);
+      ur = self.y0FEM(:,end);
+      t0 = self.tspan(1);
+      if(self.hasODE)      
+        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0,self.y0Ode,...
+          zeros(self.numODE,1));
+      else
+        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0);
+      end
+      self.dirConsFlagsLeft = ql~=0;
+      self.dirConsFlagsRight = qr~=0;
+      %fprintf('numDepVars=%d\n', obj.numDepVars);
+      %prtShortVec(obj.y0, 'y0');
+      
+      rhsFunc = @(time, u, up) self.calcRHSODE(time, u, up);
+      y0 = [self.y0FEM(:); self.y0Ode];
+      if(self.analyticalJacobian)
+        %disp('Using MatlabAutoDiff for Jacobian Evaluations');
+        jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
+        odeOpts=odeset(odeOpts, 'jacobian', jacFunc);
+      elseif(~self.isOctave)
+        % octave ode15i doesn't have JPattern option
+        jPat = self.calcJacPattern;
+        odeOpts=odeset(odeOpts, 'jpattern', {jPat, jPat});
+      end
+      u=zeros(self.totalNumEqns,1);
+      u=y0;
+      up=zerosLike(self.totalNumEqns,1,u);
+      maxIter = 10;
+      it=1;
+      converged = false;
+      debug = 01;
+      resFunc = @(u) self.calcResidual(0,u,up,u);
+      while(it<maxIter)
+        if debug> 1
+        self.printSystemVector(u, 'u');
+        end
+        r=resFunc(u);
+        rn = max(abs(r));
+        if debug
+          fprintf('it=%2d, rn=%g\n', it, rn);
+        end
+        if(rn < tol)
+          converged = true;
+          break;
+        end
+        if self.analyticalJacobian
+          J=self.calcAnalJacobianODE(0, u, up);
+        else
+          J=self.calcJacobian(0, u, up);
+        end      
+        %prtMat(J,'J');
+        du = J\r;
+        if debug> 1
+        self.printSystemVector(du, 'du');
+        end
+        u = u - du;
+        it = it + 1;
+      end
+      if ~converged
+        warning('pde1d:maxiter', 'Newton iteration did not converge.');
+      end
+      if(self.hasODE)
+        uODE = u(:,end-self.numODE+1:end);
+        varargout{1} = uODE;
+        u= u(:,1:self.numFEMEqns);
+      end  
+      u=reshape(u,self.numDepVars,[]);
     end
     
     function testODECalc(self)
@@ -213,13 +292,9 @@ classdef PDE1dImpl < handle
       %u = zeros(ne, 1);
       u=[self.y0FEM(:); self.y0Ode];
       up = zeros(ne, 1);
-      for i=1:ne
-        %u(i) = i - 1;
-        up(i) = i-1;
-      end
-      self.printSystemVector(u, 'u');
-      self.printSystemVector(up, 'up');
-     if (self.numODE)
+      %up=((1:ne)-1)';
+      self.printSystemVector(u, 'u', 1, '%16.8e');
+      if (self.numODE)
         odeIndices = ne-self.numODE+1:ne;
         v = u(odeIndices);
         vDot = up(odeIndices);
@@ -230,28 +305,43 @@ classdef PDE1dImpl < handle
         vDot = [];
         uFEM = u;
         upFEM = up;
-     end
-     analJac = self.analyticalJacobian;
-     if(analJac && self.eqnDiagnostics<1)
-       autoDiffF = @(u) self.calcResidual(0, u, up, u);
-       for i=1:10
-         kAD = AutoDiffJacobianAutoDiff(autoDiffF, u);
-       end
-       size(kAD)
-       return
-     end
+      end
+      dudtFunc = self.pdeOpts.initialSlope;
+      if ~isempty(dudtFunc)
+        dudt2FEM = zeros(self.numDepVars, self.numNodes);
+        for i=1:self.numNodes
+          dudt2FEM(:,i) = dudtFunc(self.xmesh(i));
+        end
+        upFEM = dudt2FEM(:);
+        up(1:self.numFEMEqns) = upFEM;
+      end
+      if ~isempty(self.pdeOpts.eqnDiagnosticsInitFunc)
+        [uFEM, upFEM] = self.pdeOpts.eqnDiagnosticsInitFunc();
+        u(1:self.numFEMEqns) = uFEM;
+        up(1:self.numFEMEqns) = upFEM;
+      end
+      self.printSystemVector(up, 'up', 1, '%16.8e');
+      analJac = self.analyticalJacobian;
+      if(analJac && self.eqnDiagnostics<1)
+        autoDiffF = @(u) self.calcResidual(0, u, up, u);
+        for i=1:10
+          kAD = AutoDiffJacobianAutoDiff(autoDiffF, u);
+        end
+        size(kAD)
+        return
+      end
       depVarClassType=u;
       [F, S,Cxd] = calcFEMEqns(self, 0, uFEM, upFEM, v, vDot, depVarClassType);
-      self.printSystemVector(S, 'S');
-      self.printSystemVector(F, 'F');
-      self.printSystemVector(Cxd, 'Cxd');
+      self.printSystemVector(S, 'S', 1, '%16.8e');
+      self.printSystemVector(F, 'F', 1, '%16.8e');
+      self.printSystemVector(Cxd, 'Cxd', 1, '%16.8e');
       if(self.eqnDiagnostics>1)
         K = self.calcJacobian(0, u, up);
         prtMat(K, 'K', 1, '%13g');
         M = self.calcMassMat(0, u, up);
         prtMat(M, 'M', 1, '%13g');
         Mup = M*up;
-        prtShortVec(Mup', 'Mup');
+        self.printSystemVector(Mup, 'Mup');
         jPattern = self.calcJacPattern;
         prtMat(full(jPattern), 'jPattern', 1, ' %g');
         if(analJac)
@@ -261,14 +351,14 @@ classdef PDE1dImpl < handle
         end
       end
       R = self.calcResidual(0, u, up, depVarClassType);
-      self.printSystemVector(R, 'R');
+      self.printSystemVector(R, 'R', 1, '%20.10g');
       if(self.numODE)
         [dFdv,dFdvDot]=calcDOdeDv(self, 0, u, up, F);
         prtMat(dFdv, 'dFdv', 1, '%10g');
         prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
       end
     end
-
+    
   end % methods
 	
 	methods(Access=private)
@@ -466,7 +556,7 @@ classdef PDE1dImpl < handle
       numIntPts = length(gPts);
       N = self.shapeLine2(gPts);
       dN = self.dShapeLine2(gPts);
-      x = self.xmesh;  
+      x = self.xmesh(:)';  
       u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
       up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
 			numXpts = size(self.xPts,2);
@@ -654,12 +744,12 @@ classdef PDE1dImpl < handle
       dFdu = reshape(dFdu, self.numODE, self.numFEMEqns);
     end
     
-    function printSystemVector(self, v, name)
+    function printSystemVector(self, v, name, varargin)
       if (~self.numODE)
         m = reshape(v, self.numDepVars, []);
-        prtMat(m, name);
+        prtMat(m, name, varargin{:});
       else
-        prtShortVec(v, name);
+        prtShortVec(v, name, varargin{:});
       end
     end
     
@@ -792,6 +882,7 @@ classdef PDE1dImpl < handle
     useDiagMassMat;
     vectorized;
     icDiagnostics, eqnDiagnostics, analyticalJacobian;
+    pdeOpts;
     % temporary arrays for vectorized mode
     xPts;
   end

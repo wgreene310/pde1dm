@@ -34,16 +34,17 @@ p.addRequired('bcFunc', validHandle);
 p.addRequired('xmesh', @validX);
 p.addRequired('t', @validT);
 if(hasODE)
-p.addOptional('odeFunc', validHandle);
-p.addOptional('odeICFunc', validHandle);
-validOdeMesh = @(x) isreal(x);
-p.addOptional('odeMesh', validOdeMesh);
+  p.addOptional('odeFunc', validHandle);
+  p.addOptional('odeICFunc', validHandle);
+  validOdeMesh = @(x) isreal(x);
+  p.addOptional('odeMesh', validOdeMesh);
 end
 p.addParameter('RelTol', 1e-3);
 p.addParameter('AbsTol', 1e-6);
 p.addParameter('Stats', 'off',validOnOff);
 p.addParameter('BDF', 'off');
 p.addParameter('MaxOrder', 5);
+p.addParameter('MaxStep', []);
 p.addParameter('Vectorized', 'off',validOnOff);
 p.addParameter('EqnDiagnostics', 0);
 p.addParameter('ICDiagnostics', 0);
@@ -55,6 +56,9 @@ p.addParameter('DiagonalMassMatrix', 'off', validOnOff);
 validPts = @(n) isscalar(n) && n>0;
 p.addParameter('NumIntegrationPoints', 2, validPts);
 p.addParameter('AnalyticalJacobian', 'off', validOnOff);
+p.addParameter('InitialSlope', [], validHandle);
+validInitFunc = @(x) isempty(x) || validHandle(x);
+p.addParameter('eqnDiagnosticsInitFunc', [], validInitFunc);
 p.parse(m,pde,ic,bc,xmesh,t,varargin{:});
 %p.Results
 
@@ -68,6 +72,8 @@ pdeOpts.useDiagMassMat = strcmpi(p.Results.DiagonalMassMatrix, 'on');
 pdeOpts.vectorized = strcmpi(p.Results.Vectorized, 'on');
 pdeOpts.numIntegrationPoints = p.Results.NumIntegrationPoints;
 pdeOpts.analyticalJacobian = strcmpi(p.Results.AnalyticalJacobian, 'on');
+pdeOpts.initialSlope = p.Results.InitialSlope;
+pdeOpts.eqnDiagnosticsInitFunc = p.Results.eqnDiagnosticsInitFunc;
 
 pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts);
 
@@ -81,7 +87,8 @@ if(~eqnDiagnostics)
     'AbsTol', p.Results.AbsTol, ...
     'Stats', p.Results.Stats, ...
     'BDF', p.Results.BDF, ...
-    'MaxOrder', p.Results.MaxOrder);
+    'MaxOrder', p.Results.MaxOrder, ...
+    'MaxStep', p.Results.MaxStep);
   if(hasODE)
     [outTimes,u,uODE] = pdeImpl.solveTransient(odeOpts); %#ok<ASGLU>
     varargout{1} = uODE;
