@@ -26,41 +26,43 @@ end
 
 p=inputParser;
 validHandle = @(x) isa(x, 'function_handle');
-if (~ isa (odefun, "function_handle"))
-  error ('Octave:invalid-input-arg', ...
-    'decic: FUN must be a valid function handle');
-end
+p.addRequired('odeFunc', validHandle);
+p.addRequired('t0', @(t0) isnumeric (t0) && isscalar(t0));
+isNumVec = @(x) isnumeric (x) && isvector(x);
+p.addRequired('y0', isNumVec);
+p.addRequired('fixed_y0', isNumVec);
+p.addRequired('yp0', isNumVec);
+p.addRequired('fixed_yp0', isNumVec);
+p.addParameter('RelTol', 1e-3, @(x) isscalar (x));
+p.addParameter('AbsTol', 1e-6, @(x) isscalar (x));
+p.addParameter('ICDiagnostics', 0);
+p.addParameter('Jacobian', [], @(x) validHandle(x) || (iscell(x) && length(x)==2));
+p.parse(odefun, t0, y0, fixed_y0, yp0,fixed_yp0, options);
+relTol=p.Results.RelTol;
+absTol=p.Results.AbsTol;
+icdiag = p.Results.ICDiagnostics;
+haveJac = 0;
 
-if (~ isnumeric (t0) || numel (t0) ~= 1)
-  error ('Octave:invalid-input-arg', ...
-    'decic: INIT must be a numeric scalar value');
-end
-
-y0 = y0(:);
-yp0=yp0(:);
-
-if (~ isnumeric (y0) || ~ isvector (y0) || ~ isnumeric (fixed_y0) || ...
-    ~ isvector (fixed_y0) || ~ isnumeric (yp0) || ~ isvector (yp0)|| ...
-    ~ isnumeric (fixed_yp0) || ~ isvector (fixed_yp0))
-  error ('Octave:invalid-input-arg', ...
-    'decic: y0, fixed_y0, yp0 and fixed_yp0 must be numeric vectors');
-end
-
-if (~ isequal (numel (y0), numel (fixed_y0), numel (yp0), ...
-    numel (fixed_yp0)))
-  error ('Octave:invalid-input-arg', ...
-    'decic: length of y0, fixed_y0, yp0 and fixed_yp0 must be equal');
-end
-
-for i = 1:numel (y0)
-  if (~ (fixed_y0(i) == 0 || fixed_y0(i) == 1) || ~ (fixed_yp0(i) == 0 ...
-      || fixed_yp0(i) == 1))
-    error ('Octave:invalid-input-arg', ...
-      'decic: fixed_y0 and fixed_yp0 must be boolean vectors');
+jac = p.Results.Jacobian;
+if(~isempty(jac))
+  if(iscell(jac))
+    dfDy = jac{1};
+    dfDyp = jac{2};
+    checkJacSize(dfDy, dfDyp, n);
+    haveJac = 1;
+  else
+    haveJac = 2;
   end
 end
 
-n  = numel (y0);
+% make sure they are column vectors
+y0 = y0(:); yp0 = yp0(:);
+
+n  = length (y0);
+checkLen(n, fixed_y0);
+checkLen(n, yp0);
+checkLen(n, fixed_yp0);
+
 free_y0 = ~fixed_y0;
 nl = sum (free_y0);
 anyFreeY0 = nl>0;
@@ -69,60 +71,8 @@ nu = sum (free_yp0);
 anyFreeYp0 = nu>0;
 
 if (n - nl - nu > 0)
-  error ('Octave:invalid-input-arg', ...
-    'decic: you cannot fix more than length(y0) components');
-end
-
-% make sure they are column vectors
-y0 = y0(:); yp0 = yp0(:);
-
-%Set default value
-relTol = 1e-3;
-absTol   = 1e-6;
-
-haveJac = 0;
-icdiag=0;
-%Check AbsTol, RelTol, Jacobian
-if (nargin == 7 && ~ isempty(options))
-  if (isfield(options, 'AbsTol'))
-    if (~ isscalar (options.AbsTol))
-      error ('Octave:invalid-input-arg', ...
-        'decic: AbsTol must be a scalar value');
-    else
-      absTol = options.AbsTol;
-    end
-  end
-  
-  if (isfield(options, 'RelTol'))
-    if (~ isscalar (options.RelTol))
-      error ('Octave:invalid-input-arg', ...
-        'decic: RelTol must be a scalar value');
-    else
-      relTol = options.RelTol;
-    end
-  end
-  
-  icdiag=getfieldi(options,'ICDiagnostics');
-  if(~icdiag)
-    icdiag = 0;
-  end
-  
-  if(isfield(options, 'Jacobian') && ~isempty(options.Jacobian))
-    if(iscell(options.Jacobian) && length(options.Jacobian)==2)
-      dfDy = options.Jacobian{1};
-      dfDyp = options.Jacobian{2};
-      checkJacSize(dfDy, dfDyp, n);
-      [md,nd]=size(dfDy); [mp,np]=size(dfDy);
-      haveJac = 1;
-    elseif(isa(options.Jacobian,'function_handle'))
-      haveJac = 2;
-    else
-      error ('Octave:invalid-input-arg', ...
-        'decic: Invalid value for Jacobian option');
-    end
-  end
-else
-  options = [];
+  error ('decic:too_many_fixed', ...
+    'decic: you cannot fix more than %d components', n);
 end
 
 %fprintf('anyFreeY0=%d, anyFreeYp0=%d\n', anyFreeY0, anyFreeYp0);
@@ -248,10 +198,10 @@ end
 end
 
 function checkJacSize(dfDy, dfDyp, n)
-[md,nd]=size(dfDy); [mp,np]=size(dfDy);
+[md,nd]=size(dfDy); [mp,np]=size(dfDyp);
 if(md~=n || nd~=n || mp~=n || np~=n)
   msg=sprintf('decic: Jacobian matrices must be %d x %d', n, n);
-  error ('Octave:invalid-input-arg', msg);
+  error ('decic:jac_err', msg);
 end
 end
 
@@ -269,5 +219,12 @@ if any(isField)
   value = S.(names{isField});
 else
   value = [];
+end
+end
+
+function checkLen(n, x)
+if(length(x) ~= n)
+  error('Length of input argument "%s" must equal %d.', ...
+    inputname(2), n);
 end
 end
