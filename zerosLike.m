@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-%   Copyright (C) 2016-2019 William H. Greene
+%   Copyright (C) 2016-2020 William H. Greene
 
 function z=zerosLike(varargin)
 persistent isOctave
