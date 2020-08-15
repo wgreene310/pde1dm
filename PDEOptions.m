@@ -20,7 +20,8 @@ classdef PDEOptions
   properties
     icDiagnostics, eqnDiagnostics, addLagMultVector, useDiagMassMat;
     vectorized, numIntegrationPoints, hasODE, analyticalJacobian;
-    initialSlope, eqnDiagnosticsInitFunc;
+    initialSlope, eqnDiagnosticsInitFunc, isOctave;
+    useInternalNumJac;
   end
   
   methods
@@ -35,6 +36,12 @@ classdef PDEOptions
       obj.hasODE = false;
       obj.analyticalJacobian = false;
       obj.initialSlope = [];
+      obj.isOctave = exist('OCTAVE_VERSION', 'builtin');
+      if obj.isOctave
+        obj.useInternalNumJac=true;
+      else
+        obj.useInternalNumJac=false;
+      end
     end
   end
 end

@@ -171,7 +171,10 @@ classdef PDE1dImpl < handle
         %disp('Using MatlabAutoDiff for Jacobian Evaluations');
         jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
         opts=odeset(opts, 'jacobian', jacFunc);
-      elseif(~self.isOctave)
+      elseif self.pdeOpts.useInternalNumJac
+        jacFunc = @(time, u, up) self.calcSparseJacobian(time, u, up);
+        opts=odeset(opts, 'jacobian', jacFunc);
+      else 
         % octave ode15i doesn't have JPattern option
         jPat = self.calcJacPattern;
         opts=odeset(opts, 'jpattern', {jPat, jPat});
@@ -213,24 +216,13 @@ classdef PDE1dImpl < handle
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
       
-      rhsFunc = @(time, u, up) self.calcRHSODE(time, u, up);
       y0 = [self.y0FEM(:); self.y0Ode];
-      if(self.analyticalJacobian)
-        %disp('Using MatlabAutoDiff for Jacobian Evaluations');
-        jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
-        odeOpts=odeset(odeOpts, 'jacobian', jacFunc);
-      elseif(~self.isOctave)
-        % octave ode15i doesn't have JPattern option
-        jPat = self.calcJacPattern;
-        odeOpts=odeset(odeOpts, 'jpattern', {jPat, jPat});
-      end
-      u=zeros(self.totalNumEqns,1);
       u=y0;
       up=zerosLike(self.totalNumEqns,1,u);
       maxIter = 10;
       it=1;
       converged = false;
-      debug = 01;
+      debug = 0;
       resFunc = @(u) self.calcResidual(0,u,up,u);
       while(it<maxIter)
         if debug> 1
@@ -830,6 +822,10 @@ classdef PDE1dImpl < handle
     end
     
     function J=calcJacPattern(self)
+      if ~isempty(self.jacobianPattern)
+        J = self.jacobianPattern;
+        return;
+      end
       ndv = self.numDepVars;
       nn = self.numNodes;
       % jacobian is block-tridiagonal with the block size equal numDepVars
@@ -842,6 +838,18 @@ classdef PDE1dImpl < handle
         J = [J   J21'
           J21 J22];
       end
+      self.jacobianPattern = J;
+    end
+    
+    function [dfdy, dfdyp]=calcSparseJacobian(self, time, u, up)
+      jPattern = self.calcJacPattern;
+      if isempty(self.jacobianGroupList)
+        self.jacobianGroupList=findJacobianGroups(jPattern);
+      end
+      f = @(time, u) self.calcResidual(time, u, up, u);
+      dfdy=numericalJacobian(f, jPattern, u, time, self.jacobianGroupList);
+      f = @(time, up) self.calcResidual(time, u, up, up);
+      dfdyp=numericalJacobian(f, jPattern, up, time, self.jacobianGroupList);
     end
     
 	end % methods
@@ -883,8 +891,9 @@ classdef PDE1dImpl < handle
     vectorized;
     icDiagnostics, eqnDiagnostics, analyticalJacobian;
     pdeOpts;
+    jacobianPattern, jacobianGroupList;
     % temporary arrays for vectorized mode
     xPts;
   end
-   
+  
 end % classdef
