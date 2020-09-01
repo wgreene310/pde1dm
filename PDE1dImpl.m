@@ -120,7 +120,7 @@ classdef PDE1dImpl < handle
       %opts=odeset(opts, 'Stats','on');
       opts=odeset(odeOpts);
       icdiag = self.icDiagnostics;
-      y0 = [self.y0FEM(:); self.y0Ode];
+      y0 = [self.y0FEM(:); self.y0Ode(:)];
       useDecic=true;
       useOde15i=true;
       if(useOde15i)
@@ -459,7 +459,7 @@ classdef PDE1dImpl < handle
           dFdu=calcDOdeDu(self, time, u, up, F);
           R = R - dFdu'*v; % add constraint contribution
         end
-        R=[R;f];
+        R=[R(:);f(:)];
         Cxd=[Cxd; zeros(nOde,1)];
       end
       % add constraints
