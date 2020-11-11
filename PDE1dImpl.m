@@ -164,7 +164,7 @@ classdef PDE1dImpl < handle
       % use large convergence tolerance on algebraic eqns
       M= self.calcMassMat(t0, y0, yp0);
       algEqns = abs(diag(M))<eps;
-      abstolVec(algEqns) = 1e5*abstol;
+      abstolVec(algEqns) = 1e6*abstol;
       %prtShortVec(abstolVec, 'abstolVec');
       opts=odeset(opts, 'abstol', abstolVec);
       if(self.analyticalJacobian)
@@ -457,7 +457,7 @@ classdef PDE1dImpl < handle
         f=calcODEResidual(self, time, u, up, F);
         if(self.addLagMultVector)
           dFdu=calcDOdeDu(self, time, u, up, F);
-          R = R - dFdu'*v; % add constraint contribution
+          R = R + dFdu'*v; % add constraint contribution
         end
         R=[R(:);f(:)];
         Cxd=[Cxd; zeros(nOde,1)];
@@ -676,6 +676,10 @@ classdef PDE1dImpl < handle
       f0 = self.callVarargFunc(self.odeFunc, ...
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
         1);
+      if size(f0,1) ~= mOde
+        error('Number of rows returned from ODE function must be %d.\n', ...
+          mOde);
+      end
       sqrtEps = sqrt(eps);
       dFdv = zeros(mOde, mOde);
       for i=1:mOde
@@ -717,6 +721,10 @@ classdef PDE1dImpl < handle
       f0 = self.callVarargFunc(self.odeFunc, ...
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
         1);
+      if size(f0,1) ~= self.numODE
+        error('Number of rows returned from ODE function must be %d.\n', ...
+          self.numODE);
+      end
       sqrtEps = sqrt(eps);
       dFdu = zerosLike(self.numODE, self.numDepVars, self.numNodes, u);
       for i=1:self.numNodes
