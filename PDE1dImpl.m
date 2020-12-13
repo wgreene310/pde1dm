@@ -140,8 +140,8 @@ classdef PDE1dImpl < handle
         yp0 = zeros(n,1);
         %icf(0,y0,yp0)'
         fixed_yp0 = zeros(n,1);
-        icopts.AbsTol=1e-7;
-        icopts.RelTol=1e-4;
+        icopts.AbsTol=abstol;
+        icopts.RelTol=reltol;
         icopts.icdiagnostics=icdiag;
         y0Save = y0;
         if(0)
