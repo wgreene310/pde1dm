@@ -48,7 +48,6 @@ p.addParameter('MaxStep', []);
 p.addParameter('Vectorized', 'off',validOnOff);
 p.addParameter('EqnDiagnostics', 0);
 p.addParameter('ICDiagnostics', 0);
-p.addParameter('JacDiagnostics', 0);
 p.addParameter('PolyOrder', 1);
 p.addParameter('ViewMesh', 1);
 p.addParameter('AddLagMultVector', false);

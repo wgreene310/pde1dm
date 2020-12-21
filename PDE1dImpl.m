@@ -23,9 +23,7 @@ classdef PDE1dImpl < handle
 		 pdeFunc,icFunc,bcFunc;
      numDepVars;
      mCoord;
-     %options;
-     hasODE, odeFunc, odeICFunc, odeMesh, numODE;
-  end
+   end
   
   methods
     
@@ -53,7 +51,6 @@ classdef PDE1dImpl < handle
     obj.numFEMEqns = obj.numNodes*obj.numDepVars;
     obj.totalNumEqns = obj.numFEMEqns;
     obj.hasODE = opts.hasODE;
-    obj.numODE = 0;
     obj.addLagMultVector = opts.addLagMultVector;
     obj.useDiagMassMat = opts.useDiagMassMat;
     obj.vectorized = opts.vectorized;
@@ -66,6 +63,7 @@ classdef PDE1dImpl < handle
     for i=1:obj.numNodes
       obj.y0FEM(:,i) = icFunc(x(i));
     end
+    obj.y0 = obj.y0FEM(:);
     
     ne = obj.numNodes-1;
     numXpts = ne*obj.numIntegrationPoints;
@@ -84,13 +82,10 @@ classdef PDE1dImpl < handle
     end
     
     function setODE(self, odeFunc, odeICFunc, odeMesh)
-      self.odeFunc = odeFunc;
-      self.odeICFunc = odeICFunc;
-      self.odeMesh = odeMesh;
-      self.meshMapper = PDEMeshMapper(self.xmesh, odeMesh);
-      self.y0Ode = self.odeICFunc();
-      self.numODE = length(self.y0Ode);
-      self.totalNumEqns = self.numFEMEqns + self.numODE;
+      self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
+        odeMesh);
+      self.y0 = [self.y0FEM(:); self.odeImpl.y0Ode(:)];
+      self.totalNumEqns = self.numFEMEqns + self.odeImpl.numODEDOFs;
     end
 		
     function [outTimes,u,varargout]=solveTransient(self, odeOpts)
@@ -103,24 +98,25 @@ classdef PDE1dImpl < handle
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
-      if(self.hasODE)
-        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0,self.y0Ode,...
-          zeros(self.numODE,1));
+      y0Ode = self.odeVFromSysVec(self.y0);
+      if self.hasODE
+        yp0Ode = zeros(self.odeImpl.numODEDOFs,1);
       else
-        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0);
+        yp0Ode = [];
       end
+      [pl,ql,pr,qr] = callVarargFunc(self.bcFunc,...
+        {xl, ul,xr,ur,t0,y0Ode,yp0Ode});
       self.dirConsFlagsLeft = ql~=0;
       self.dirConsFlagsRight = qr~=0;
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
       
       massFunc = @(time, u, up) self.calcMassMat(time, u, up);
-      rhsFunc = @(time, u, up) self.calcRHSODE(time, u, up);
+      rhsFunc = @(time, u, up) self.calcRHS(time, u, up);
       %opts=odeset('reltol', reltol, 'abstol', abstol);
       %opts=odeset(opts, 'Stats','on');
       opts=odeset(odeOpts);
       icdiag = self.icDiagnostics;
-      y0 = [self.y0FEM(:); self.y0Ode(:)];
       useDecic=true;
       useOde15i=true;
       if(useOde15i)
@@ -128,10 +124,10 @@ classdef PDE1dImpl < handle
       end
       if(useDecic)
         %icf = @(t,y,yp) massFunc(t,y,yp)*yp-rhsFunc(t,y,yp);
-        depVarClassType=y0;
+        depVarClassType=self.y0;
         icf = @(t,y,yp) self.calcResidual(t,y,yp,depVarClassType);
         t0 = self.tspan(1);
-        n=length(y0);
+        n=length(self.y0);
         %fixed_y0 = ones(n,1);
         %fixed_y0 = [ones(n-1,1);0];
         %fixed_y0 = [0; ones(n-1,1)];
@@ -143,11 +139,11 @@ classdef PDE1dImpl < handle
         icopts.AbsTol=abstol;
         icopts.RelTol=reltol;
         icopts.icdiagnostics=icdiag;
-        y0Save = y0;
+        y0Save = self.y0;
         if(0)
-          [y0,yp0]=decic(icf, t0,y0,fixed_y0,yp0,fixed_yp0);
+          [y0,yp0]=decic(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0);
         else
-          [y0,yp0]=decicShampine(icf, t0,y0,fixed_y0,yp0,fixed_yp0,icopts);
+          [y0,yp0]=decicShampine(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0,icopts);
         end
         if(icdiag)
           fprintf('max change, y0=%g\n', max(abs(y0-y0Save)));
@@ -187,9 +183,9 @@ classdef PDE1dImpl < handle
         opts=odeset(opts, 'Mass', massFunc);
         [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
       end
-      if(self.hasODE)
-        uODE = u(:,end-self.numODE+1:end);
-        varargout{1} = uODE;
+      if self.hasODE
+        uOde = u(:,self.numFEMEqns+1:end);
+        varargout{1} = uOde;
         u= u(:,1:self.numFEMEqns);
       end
     end
@@ -205,19 +201,16 @@ classdef PDE1dImpl < handle
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
-      if(self.hasODE)      
-        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0,self.y0Ode,...
-          zeros(self.numODE,1));
-      else
-        [pl,ql,pr,qr] = self.bcFunc(xl, ul,xr,ur,t0);
-      end
+      y0Ode = self.odeVFromSysVec(self.y0);
+      yp0Ode = 0*y0Ode;
+      [pl,ql,pr,qr] = callVarargFunc(self.bcFunc, ...
+        {xl, ul,xr,ur,t0,y0Ode,yp0Ode});
       self.dirConsFlagsLeft = ql~=0;
       self.dirConsFlagsRight = qr~=0;
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
       
-      y0 = [self.y0FEM(:); self.y0Ode];
-      u=y0;
+      u=self.y0;
       up=zerosLike(self.totalNumEqns,1,u);
       maxIter = 10;
       it=1;
@@ -256,13 +249,12 @@ classdef PDE1dImpl < handle
       if(self.hasODE)
         uODE = u(:,end-self.numODE+1:end);
         varargout{1} = uODE;
-        u= u(:,1:self.numFEMEqns);
       end  
-      u=reshape(u,self.numDepVars,[]);
+      u=self.femU2FromSysVec(u);
     end
     
     function testODECalc(self)
-      mOde = self.numODE;
+      mOde = self.odeImpl.numODEDOFs;
       ne = self.numFEMEqns + mOde;
       u = linspace(2,10,ne);
       up = linspace(-2,-4,ne);
@@ -275,19 +267,22 @@ classdef PDE1dImpl < handle
       prtShortVec(Cv, 'Cxd');
       R = Cv - S + F;
       prtShortVec(R, 'R');
-      f=self.calcODEResidual(0, u, up, F)
-      dFdu=calcDOdeDu(self, 0, u, up, F)
+      u2 = self.femU2FromSysVec(u);
+      up2 = self.femU2FromSysVec(up);
+      f2 = self.femU2FromSysVec(F);
+      f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
+      dFdu=self.odeImpl.calcDOdeDu(time, u2, up2, f2, v, vDot);
     end
     
     function testFuncs(self)
       ne = self.totalNumEqns;
       %u = zeros(ne, 1);
-      u=[self.y0FEM(:); self.y0Ode];
+      u=self.y0;
       up = zeros(ne, 1);
       %up=((1:ne)-1)';
       self.printSystemVector(u, 'u', 1, '%16.8e');
-      if (self.numODE)
-        odeIndices = ne-self.numODE+1:ne;
+      if self.hasODE
+        odeIndices =self.numFEMEqns+1:ne;
         v = u(odeIndices);
         vDot = up(odeIndices);
         uFEM = u(1:self.numFEMEqns);
@@ -344,8 +339,11 @@ classdef PDE1dImpl < handle
       end
       R = self.calcResidual(0, u, up, depVarClassType);
       self.printSystemVector(R, 'R', 1, '%20.10g');
-      if(self.numODE)
-        [dFdv,dFdvDot]=calcDOdeDv(self, 0, u, up, F);
+      if self.hasODE
+        u2 = self.femU2FromSysVec(u);
+        up2 = self.femU2FromSysVec(up);
+        f2 = self.femU2FromSysVec(F);        
+        [dFdv,dFdvDot]=self.odeImpl.calcDOdeDv(0, u2, up2, f2, v, vDot);
         prtMat(dFdv, 'dFdv', 1, '%10g');
         prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
       end
@@ -381,10 +379,10 @@ classdef PDE1dImpl < handle
         usave = u(i);
         delta = 1e-4;
         u(i) = u(i) + delta;
-        rp = calcRHSODE(self, time, u, depVarClassType);
+        rp = calcRHS(self, time, u, depVarClassType);
         u(i) = usave;
         u(i) = u(i) - delta;
-        rm = calcRHSODE(self, time, u, depVarClassType);
+        rm = calcRHS(self, time, u, depVarClassType);
         jac(:,i) = (rp-rm)/(2*delta);
         u(i) = usave;
       end
@@ -407,42 +405,18 @@ classdef PDE1dImpl < handle
         up(i) = upsave;
       end
     end
-   
-    function R = calcRHSODEX(self, time, u, up)
-      % this function was used by ode15s
-       if (self.numODE)
-        ne = self.totalNumEquations;
-        odeIndices = ne-self.numODE+1:ne;
-        v = u(odeIndices);
-        vDot = up(odeIndices);
-        uFEM = u(1:self.numFEMEquations);
-        upFEM = up(1:self.numFEMEquations);
-      else
-        v = [];
-        vDot = [];
-        uFEM = u;
-        upFEM = up;
-      end
-      [F, S] = calcFEMEqns(self, time, u, up, v, vDot);
-      R = F - S;  
-      % add constraints
-      R=self.applyConstraints(R,u,v,vDot,time);
-    end 
     
     function R = calcResidual(self, time, u, up, depVarClassType)
-      [rhs,Cxd] = calcRHSODE(self, time, u, up, depVarClassType);
+      [rhs,Cxd] = calcRHS(self, time, u, up, depVarClassType);
       R = Cxd+rhs;
     end
     
-    function [R,Cxd] = calcRHSODE(self, time, u, up, depVarClassType)
-      nOde = self.numODE;
-     if (nOde)
-        ne = self.totalNumEqns;
-        odeIndices = ne-nOde+1:ne;
-        v = u(odeIndices);
-        vDot = up(odeIndices);
-        uFEM = u(1:self.numFEMEqns);
-        upFEM = up(1:self.numFEMEqns);
+    function [R,Cxd] = calcRHS(self, time, u, up, depVarClassType)
+      if self.hasODE
+        v = self.odeVFromSysVec(u);
+        vDot = self.odeVFromSysVec(up);
+        uFEM = self.femUFromSysVec(u);
+        upFEM = self.femUFromSysVec(up);
       else
         v = [];
         vDot = [];
@@ -453,36 +427,22 @@ classdef PDE1dImpl < handle
       R = F-S;
       %R = Cxd-R;
       %R=-R;
-      if (nOde)
-        f=calcODEResidual(self, time, u, up, F);
+      if self.hasODE
+          u2 = self.femU2FromSysVec(u);
+          up2 = self.femU2FromSysVec(up);
+          f2 = self.femU2FromSysVec(F);
+          f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
         if(self.addLagMultVector)
-          dFdu=calcDOdeDu(self, time, u, up, F);
+          dFdu=self.odeImpl.calcDOdeDu(time, u2, up2, f2, v, vDot);
           R = R + dFdu'*v; % add constraint contribution
         end
         R=[R(:);f(:)];
-        Cxd=[Cxd; zeros(nOde,1)];
+        Cxd=[Cxd; zeros(self.odeImpl.numODEDOFs,1)];
       end
       % add constraints
       [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
       R=-R;
     end 
-    function f=calcODEResidual(self, time, u, up, F)
-      m = self.numODE-1;
-      v = u(end-m:end);
-      vDot = up(end-m:end);
-      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
-      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
-      f2 = reshape(F, self.numDepVars, []);
-      mm = self.meshMapper;
-      uOde=mm.mapFunction(u2);
-      upOde=mm.mapFunction(up2);
-      dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
-      dupdxOde=mm.mapFunctionDer(up2);
-      f = self.callVarargFunc(self.odeFunc, ...
-        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-        1);
-    end
     
     function [dfdy, dfdyp]=calcAnalJacobianODE(self, time, u, up)
       autoDiffF = @(u) self.calcResidual(time, u, up, u);
@@ -492,13 +452,13 @@ classdef PDE1dImpl < handle
     end
     
     function [R,Cxd]=applyConstraints(self, R, Cxd, u,v, vDot,time)
-      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
+      u2=self.femU2FromSysVec(u);
       x = self.xmesh;
       xl = x(1);
       xr = x(end);
       %[pl,ql,pr,qr] = self.bcFunc(x(1), u2(:,1),x(end),u2(:,end),time);
-      [pl,ql,pr,qr] = self.callVarargFunc(self.bcFunc, ...
-        {xl, u2(:,1),xr,u2(:,end),time,v, vDot}, 4);
+      [pl,ql,pr,qr] = callVarargFunc(self.bcFunc, ...
+        {xl, u2(:,1),xr,u2(:,end),time,v, vDot});
       rightDofOff = self.numFEMEqns - self.numDepVars;
       m=self.mCoord;
       sing = m~=0 && xl==0;
@@ -549,8 +509,8 @@ classdef PDE1dImpl < handle
       N = self.shapeLine2(gPts);
       dN = self.dShapeLine2(gPts);
       x = self.xmesh(:)';  
-      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
-      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
+      u2 = self.femU2FromSysVec(u);
+      up2 = self.femU2FromSysVec(up);
 			numXpts = size(self.xPts,2);
       jac = diff(x)/2;
       nen=self.numElemNodes;
@@ -569,8 +529,8 @@ classdef PDE1dImpl < handle
       end
       if(self.vectorized)
         % call pde func for all points
-        [c,f,s] = self.callVarargFunc(self.pdeFunc, ...
-          {self.xPts,t,uPts,duPts,v, vDot}, 3);
+        [c,f,s] = callVarargFunc(self.pdeFunc, ...
+          {self.xPts,t,uPts,duPts,v, vDot});
         isFullCMat=self.checkCCoefficientMatrixSizeVec(c);
         self.checkCoefficientMatrixSizeVec(f, 'f');
         self.checkCoefficientMatrixSizeVec(s, 's');
@@ -580,8 +540,8 @@ classdef PDE1dImpl < handle
         s = zerosLike(ndv, numXpts, depVarClassType);
         for i=1:size(self.xPts,2)
           [ci,fi,si] = ...
-            self.callVarargFunc(self.pdeFunc, ...
-            {self.xPts(i),t,uPts(:,i),duPts(:,i),v, vDot}, 3);
+            callVarargFunc(self.pdeFunc, ...
+            {self.xPts(i),t,uPts(:,i),duPts(:,i),v, vDot});
         isFullCMat=self.checkCCoefficientMatrixSize(ci);
         self.checkCoefficientMatrixSize(fi, 'f');
         self.checkCoefficientMatrixSize(si, 's');
@@ -659,93 +619,9 @@ classdef PDE1dImpl < handle
       S=S(:);
       Cv=Cv(:);
     end
-     
-    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u, up, F)
-      mOde = self.numODE;
-      v = u(end-mOde+1:end);
-      vDot = up(end-mOde+1:end);
-      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
-      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
-      f2 = reshape(F, self.numDepVars, []);
-      mm = self.meshMapper;
-      uOde=mm.mapFunction(u2);
-      upOde=mm.mapFunction(up2);
-      dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
-      dupdxOde=mm.mapFunctionDer(up2);
-      f0 = self.callVarargFunc(self.odeFunc, ...
-        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-        1);
-      if size(f0,1) ~= mOde
-        error('Number of rows returned from ODE function must be %d.\n', ...
-          mOde);
-      end
-      sqrtEps = sqrt(eps);
-      dFdv = zeros(mOde, mOde);
-      for i=1:mOde
-        vSave = v(i);
-        h = sqrtEps * max(vSave, 1);
-        v(i) = v(i) + h;
-        fp = self.callVarargFunc(self.odeFunc, ...
-          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-          1);
-        dFdv(:,i) = (fp-f0)/h;
-        v(i) = vSave;
-      end
-      dFdvDot = zeros(mOde, mOde);
-      for i=1:mOde
-        vDotSave = vDot(i);
-        h = sqrtEps * max(vDotSave, 1);
-        vDot(i) = vDot(i) + h;
-        fp = self.callVarargFunc(self.odeFunc, ...
-          {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-          1);
-        dFdvDot(:,i) = (fp-f0)/h;
-        vDot(i) = vDotSave;
-      end
-    end
-    
-    function dFdu=calcDOdeDu(self, time, u, up, F)
-      m = self.numODE-1;
-      v = u(end-m:end);
-      vDot = up(end-m:end);
-      u2 = reshape(u(1:self.numFEMEqns), self.numDepVars, []);
-      up2 = reshape(up(1:self.numFEMEqns), self.numDepVars, []);
-      f2 = reshape(F, self.numDepVars, []);
-      mm = self.meshMapper;
-      uOde=mm.mapFunction(u2);
-      upOde=mm.mapFunction(up2);
-      dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
-      dupdxOde=mm.mapFunctionDer(up2);
-      f0 = self.callVarargFunc(self.odeFunc, ...
-        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-        1);
-      if size(f0,1) ~= self.numODE
-        error('Number of rows returned from ODE function must be %d.\n', ...
-          self.numODE);
-      end
-      sqrtEps = sqrt(eps);
-      dFdu = zerosLike(self.numODE, self.numDepVars, self.numNodes, u);
-      for i=1:self.numNodes
-        for j=1:self.numDepVars
-          usave = u2(j,i);
-          h = sqrtEps * max(usave, 1);
-          u2(j,i) = u2(j,i) + h;
-          uOde=mm.mapFunction(u2);
-          dudxOde=mm.mapFunctionDer(u2);
-          f = self.callVarargFunc(self.odeFunc, ...
-            {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde}, ...
-            1);
-          dFdu(:,j,i) = (f-f0)/h;
-          u2(j,i) = usave;
-        end
-      end
-      dFdu = reshape(dFdu, self.numODE, self.numFEMEqns);
-    end
     
     function printSystemVector(self, v, name, varargin)
-      if (~self.numODE)
+      if ~self.hasODE
         m = reshape(v, self.numDepVars, []);
         prtMat(m, name, varargin{:});
       else
@@ -840,9 +716,10 @@ classdef PDE1dImpl < handle
       J = kron( spdiags(ones(nn,3),[-1 0 1],nn,nn), ones(ndv,ndv));
       
       % odes may couple with any other vars
-      if(self.numODE)
-        J21 = ones(self.numODE, self.numFEMEqns);
-        J22 = ones(self.numODE, self.numODE);
+      if self.hasODE
+        numODE = self.odeImpl.numODEDOFs;
+        J21 = ones(numODE, self.numFEMEqns);
+        J22 = ones(numODE, numODE);
         J = [J   J21'
           J21 J22];
       end
@@ -860,6 +737,20 @@ classdef PDE1dImpl < handle
       dfdyp=numericalJacobian(f, jPattern, up, time, self.jacobianGroupList);
     end
     
+    function v=femUFromSysVec(self,v)
+      v=v(:);
+      v = v(1:self.numFEMEqns);
+    end
+    
+    function v2=femU2FromSysVec(self,v)
+      v2 = reshape(v(1:self.numFEMEqns), self.numDepVars, []);
+    end
+    
+    function vode=odeVFromSysVec(self,v)
+      v=v(:);
+      vode = v(self.numFEMEqns+1:end);
+    end
+    
 	end % methods
   
   methods(Access=private, Static)
@@ -872,17 +763,6 @@ classdef PDE1dImpl < handle
       ds = [-.5 .5]'*ones(1,length(r));
     end
     
-    function varargout=callVarargFunc(func, args, nout)
-      numExpectedArgs=nargin(func);
-      if numExpectedArgs>length(args)
-        fn = func2str(func);
-        error(['Function \"' fn '\" is expecting %d arguments but is being called with' ...
-          ' only %d arguments.'], numExpectedArgs, length(args));
-      end
-      tmp=func(args{1:numExpectedArgs});
-      [varargout{1:nout}]=func(args{1:nargin(func)});
-    end
-    
   end % methods
   
   properties(Access=private)
@@ -891,9 +771,9 @@ classdef PDE1dImpl < handle
     numNodes, numElemNodes;
     numFEMEqns, totalNumEqns;
     numIntegrationPoints;
+    hasODE, odeImpl;
     dirConsFlagsLeft, dirConsFlagsRight;
-    meshMapper;
-    y0FEM, y0Ode;
+    y0FEM, y0;
     addLagMultVector;
     useDiagMassMat;
     vectorized;
