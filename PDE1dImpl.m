@@ -85,7 +85,7 @@ classdef PDE1dImpl < handle
       self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
         odeMesh);
       self.y0 = [self.y0FEM(:); self.odeImpl.y0Ode(:)];
-      self.totalNumEqns = self.numFEMEqns + self.odeImpl.numODEDOFs;
+      self.totalNumEqns = size(self.y0,1);
     end
 		
     function [outTimes,u,varargout]=solveTransient(self, odeOpts)
@@ -254,14 +254,16 @@ classdef PDE1dImpl < handle
     end
     
     function testODECalc(self)
-      mOde = self.odeImpl.numODEDOFs;
-      ne = self.numFEMEqns + mOde;
-      u = linspace(2,10,ne);
-      up = linspace(-2,-4,ne);
-      u=0:ne;
-      up=u;
-      v=u(end-mOde:end);
-      vDot=up(end-mOde:end);
+      ne = self.totalNumEqns;
+      if 1
+        u = linspace(2,10,ne);
+        up = linspace(-2,-4,ne);
+      else
+        u=0:ne;
+        up=u;
+      end
+      v=self.odeVFromSysVec(u);
+      vDot=self.odeVFromSysVec(up);
       [F, S,Cv] = calcFEMEqns(self, 0, u, up, v, vDot);
       prtShortVec(F, 'F');
       prtShortVec(Cv, 'Cxd');
@@ -428,15 +430,17 @@ classdef PDE1dImpl < handle
       %R = Cxd-R;
       %R=-R;
       if self.hasODE
-          u2 = self.femU2FromSysVec(u);
-          up2 = self.femU2FromSysVec(up);
-          f2 = self.femU2FromSysVec(F);
-          f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
+        u2 = self.femU2FromSysVec(u);
+        up2 = self.femU2FromSysVec(up);
+        f2 = self.femU2FromSysVec(F);
+        f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
         if(self.addLagMultVector)
           dFdu=self.odeImpl.calcDOdeDu(time, u2, up2, f2, v, vDot);
           R = R + dFdu'*v; % add constraint contribution
         end
         R=[R(:);f(:)];
+        % f contains the total residual from ODE equations
+        % (there is no separate inertia term)
         Cxd=[Cxd; zeros(self.odeImpl.numODEDOFs,1)];
       end
       % add constraints
