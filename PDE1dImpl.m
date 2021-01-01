@@ -327,6 +327,7 @@ classdef PDE1dImpl < handle
       if(self.eqnDiagnostics>1)
         K = self.calcJacobian(0, u, up);
         prtMat(K, 'K', 1, '%13g');
+        fprintf('K: rank=%d, cond num=%g\n', rank(K), cond(K));
         M = self.calcMassMat(0, u, up);
         prtMat(M, 'M', 1, '%13g');
         Mup = M*up;
