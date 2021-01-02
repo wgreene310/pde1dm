@@ -88,7 +88,7 @@ classdef PDE1dImpl < handle
       self.totalNumEqns = size(self.y0,1);
     end
 		
-    function [outTimes,u,varargout]=solveTransient(self, odeOpts)
+    function [u,varargout]=solveTransient(self, odeOpts)
       
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;

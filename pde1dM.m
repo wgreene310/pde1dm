@@ -89,10 +89,10 @@ if(~eqnDiagnostics)
     'MaxOrder', p.Results.MaxOrder, ...
     'MaxStep', p.Results.MaxStep);
   if(hasODE)
-    [outTimes,u,uODE] = pdeImpl.solveTransient(odeOpts); %#ok<ASGLU>
+    [u,uODE] = pdeImpl.solveTransient(odeOpts);
     varargout{1} = uODE;
   else
-    [outTimes,u] = pdeImpl.solveTransient(odeOpts);
+    u = pdeImpl.solveTransient(odeOpts);
   end
   npde=pdeImpl.numDepVars;
   if(npde==1)
@@ -108,13 +108,11 @@ end
 end
 
 function sol=toSol3(u, npde, nx)
-  nt=size(u, 1);
-  sol = zeros(nt, nx, npde);
-  u = reshape(u, nt, npde, nx);
-  for i=1: nt
-    ui = reshape(u(i, :, :), npde, nx);
-    sol(i, :, :) = ui.';
-  end
+nt=size(u, 1);
+sol = zeros(nt, nx, npde);
+for i = 1:npde
+  sol(:,:,i) = u(:,i:npde:end);
+end
 end
 
 function valid=validM(m)
