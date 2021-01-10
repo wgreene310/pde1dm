@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-% Copyright (C) 2016-2020 William H. Greene
+% Copyright (C) 2016-2021 William H. Greene
 
 function [y0_new, yp0_new, resnrm] = decicShampine (odefun, t0, y0, fixed_y0, yp0, ...
   fixed_yp0, options)
@@ -81,8 +81,10 @@ maxIter = 10;
 it = 0;
 y0_new = y0; yp0_new = yp0;
 if(icdiag)
+  fprintf('decic: AbsTol=%g, RelTol=%g\n', absTol, relTol);
   prtShortVec(y0, 'y0');
   prtShortVec(yp0, 'yp0');
+  prtShortVec(odefun(t0,y0, yp0), 'res0');
 end
 while(it <= maxIter)
   res = odefun(t0,y0_new, yp0_new);
@@ -90,6 +92,9 @@ while(it <= maxIter)
   maxRes = max(max(relTol*abs(res),absTol));
   if(icdiag > 1)
     fprintf('iteration=%d, maxres=%12.3e\n', it, maxRes);
+  end
+  if(icdiag > 2)
+    prtShortVec(res, 'res');
   end
   if(maxRes <= absTol)
     return;
@@ -151,6 +156,14 @@ while(it <= maxIter)
         [Qs,Rs,Es] = qr(S2122);
         % FIXME: need to check rank here
         w = Es*(Rs\(Qs'*d(algdofs)));
+        if(icdiag > 3)
+          prtMat(Qs, 'Qs');
+          prtMat(Rs, 'Rs');
+          prtMat(Es, 'Es');
+        end
+      end
+      if(icdiag > 2)
+        prtShortVec(w, 'w');
       end
       y0_new(free_y0) = y0_new(free_y0) + w;
       w1p = R11\(d(difdofs) - S(difdofs,:)*w);
@@ -160,6 +173,11 @@ while(it <= maxIter)
     wp = zeros(nu,1);
     wp(difdofs) = w1p;
     yp0_new(free_yp0) = yp0_new(free_yp0) + E*wp;
+    if(icdiag > 2)
+      prtShortVec(w1p, 'w1p');
+      prtShortVec(y0_new, 'y0_new');
+      prtShortVec(yp0_new, 'yp0_new');
+    end
   end
   it = it + 1;
 end
