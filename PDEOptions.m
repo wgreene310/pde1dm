@@ -14,11 +14,11 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-%   Copyright (C) 2016-2020 William H. Greene
+%   Copyright (C) 2016-2021 William H. Greene
 
 classdef PDEOptions
   properties
-    icDiagnostics, eqnDiagnostics, addLagMultVector, useDiagMassMat;
+    icDiagnostics, eqnDiagnostics, useDiagMassMat;
     vectorized, numIntegrationPoints, hasODE, analyticalJacobian;
     initialSlope, eqnDiagnosticsInitFunc, isOctave;
     useInternalNumJac;
@@ -29,7 +29,6 @@ classdef PDEOptions
       obj.icDiagnostics=0;
       obj.eqnDiagnostics=0;
       obj.eqnDiagnosticsInitFunc=[];
-      obj.addLagMultVector = false;
       obj.useDiagMassMat = false;
       obj.vectorized = false;
       obj.numIntegrationPoints = 2;

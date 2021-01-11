@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-% Copyright (C) 2016-2020 William H. Greene
+% Copyright (C) 2016-2021 William H. Greene
 
 classdef PDE1dImpl < handle
 
@@ -27,7 +27,8 @@ classdef PDE1dImpl < handle
   
   methods
     
-    function obj=PDE1dImpl(m, pdeFunc,icFunc,bcFunc,x,t,opts)
+    function obj=PDE1dImpl(m, pdeFunc,icFunc,bcFunc,x,t,opts, ...
+        odeFunc, odeICFunc, odeMesh)
     if(~isscalar(m) || ~isnumeric(m) || (m ~= 0 && m ~=1 && m ~=2))
       error(['m must equal 0, 1, or 2 for Cartesian, cylindrical' ...
      ' or spherical coordinate systems, respectively.']);
@@ -51,7 +52,6 @@ classdef PDE1dImpl < handle
     obj.numFEMEqns = obj.numNodes*obj.numDepVars;
     obj.totalNumEqns = obj.numFEMEqns;
     obj.hasODE = opts.hasODE;
-    obj.addLagMultVector = opts.addLagMultVector;
     obj.useDiagMassMat = opts.useDiagMassMat;
     obj.vectorized = opts.vectorized;
     obj.numIntegrationPoints = opts.numIntegrationPoints;
@@ -79,13 +79,29 @@ classdef PDE1dImpl < handle
     
     obj.isOctave = exist('OCTAVE_VERSION', 'builtin');
     
+    if obj.hasODE
+      obj.setODE(odeFunc, odeICFunc, odeMesh);
+    end
+    
     end
     
     function setODE(self, odeFunc, odeICFunc, odeMesh)
+      v0=odeICFunc();
+      nV = size(v0,1);
+      v0Dot = zeros(nV,1);
+      t0 = self.tspan(1);
+      yp0 = zeros(self.numFEMEqns, 1);
+      [F, S,Cxd] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
+      u2 = self.femU2FromSysVec(self.y0);
+      up2 = self.femU2FromSysVec(yp0);
+      f2 = self.femU2FromSysVec(F);
       self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
-        odeMesh);
-      self.y0 = [self.y0FEM(:); self.odeImpl.y0Ode(:)];
-      self.totalNumEqns = size(self.y0,1);
+        odeMesh, t0, u2, up2, f2);
+      numODEEqn = self.odeImpl.numODEEquations;
+      self.totalNumEqns = self.numFEMEqns + numODEEqn;
+      % there can be more ODE equations than ODE variables if
+      %  some of the ODE equations are just constraints on the FEM dofs
+      self.y0 = [self.y0FEM(:); v0; zeros(numODEEqn-nV,1)];
     end
 		
     function [u,varargout]=solveTransient(self, odeOpts)
@@ -98,10 +114,12 @@ classdef PDE1dImpl < handle
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
-      y0Ode = self.odeVFromSysVec(self.y0);
+      
       if self.hasODE
-        yp0Ode = zeros(self.odeImpl.numODEDOFs,1);
+        y0Ode = self.odeImpl.getVFromSysVec(self.y0);
+        yp0Ode = zeros(self.odeImpl.numODEEquations,1);
       else
+        y0Ode = [];
         yp0Ode = [];
       end
       [pl,ql,pr,qr] = callVarargFunc(self.bcFunc,...
@@ -184,7 +202,7 @@ classdef PDE1dImpl < handle
         [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
       end
       if self.hasODE
-        uOde = u(:,self.numFEMEqns+1:end);
+        uOde = u(:,self.numFEMEqns+1:self.numFEMEqns+self.odeImpl.numODEVariables);
         varargout{1} = uOde;
         u= u(:,1:self.numFEMEqns);
       end
@@ -251,29 +269,6 @@ classdef PDE1dImpl < handle
         varargout{1} = uODE;
       end  
       u=self.femU2FromSysVec(u);
-    end
-    
-    function testODECalc(self)
-      ne = self.totalNumEqns;
-      if 1
-        u = linspace(2,10,ne);
-        up = linspace(-2,-4,ne);
-      else
-        u=0:ne;
-        up=u;
-      end
-      v=self.odeVFromSysVec(u);
-      vDot=self.odeVFromSysVec(up);
-      [F, S,Cv] = calcFEMEqns(self, 0, u, up, v, vDot);
-      prtShortVec(F, 'F');
-      prtShortVec(Cv, 'Cxd');
-      R = Cv - S + F;
-      prtShortVec(R, 'R');
-      u2 = self.femU2FromSysVec(u);
-      up2 = self.femU2FromSysVec(up);
-      f2 = self.femU2FromSysVec(F);
-      f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
-      dFdu=self.odeImpl.calcDOdeDu(time, u2, up2, f2, v, vDot);
     end
     
     function testFuncs(self)
@@ -416,8 +411,8 @@ classdef PDE1dImpl < handle
     
     function [R,Cxd] = calcRHS(self, time, u, up, depVarClassType)
       if self.hasODE
-        v = self.odeVFromSysVec(u);
-        vDot = self.odeVFromSysVec(up);
+        v = self.odeImpl.getVFromSysVec(u);
+        vDot = self.odeImpl.getVFromSysVec(up);
         uFEM = self.femUFromSysVec(u);
         upFEM = self.femUFromSysVec(up);
       else
@@ -434,15 +429,8 @@ classdef PDE1dImpl < handle
         u2 = self.femU2FromSysVec(u);
         up2 = self.femU2FromSysVec(up);
         f2 = self.femU2FromSysVec(F);
-        f=self.odeImpl.calcODEResidual(time, u2, up2, f2, v, vDot);
-        if(self.addLagMultVector)
-          dFdu=self.odeImpl.calcDOdeDu(time, u2, up2, f2, v, vDot);
-          R = R + dFdu'*v; % add constraint contribution
-        end
-        R=[R(:);f(:)];
-        % f contains the total residual from ODE equations
-        % (there is no separate inertia term)
-        Cxd=[Cxd; zeros(self.odeImpl.numODEDOFs,1)];
+        [R,Cxd]=self.odeImpl.updateResiduals(time, u, up, ...
+          u2, up2, f2, R, Cxd);
       end
       % add constraints
       [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
@@ -722,7 +710,7 @@ classdef PDE1dImpl < handle
       
       % odes may couple with any other vars
       if self.hasODE
-        numODE = self.odeImpl.numODEDOFs;
+        numODE = self.odeImpl.numODEEquations;
         J21 = ones(numODE, self.numFEMEqns);
         J22 = ones(numODE, numODE);
         J = [J   J21'
@@ -751,11 +739,6 @@ classdef PDE1dImpl < handle
       v2 = reshape(v(1:self.numFEMEqns), self.numDepVars, []);
     end
     
-    function vode=odeVFromSysVec(self,v)
-      v=v(:);
-      vode = v(self.numFEMEqns+1:end);
-    end
-    
 	end % methods
   
   methods(Access=private, Static)
@@ -779,7 +762,6 @@ classdef PDE1dImpl < handle
     hasODE, odeImpl;
     dirConsFlagsLeft, dirConsFlagsRight;
     y0FEM, y0;
-    addLagMultVector;
     useDiagMassMat;
     vectorized;
     icDiagnostics, eqnDiagnostics, analyticalJacobian;

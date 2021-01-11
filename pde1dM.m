@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-% Copyright (C) 2016-2020 William H. Greene
+% Copyright (C) 2016-2021 William H. Greene
 
 function [sol,varargout] = pde1dM (m, pde,ic,bc,xmesh,t,varargin)
 
@@ -33,7 +33,7 @@ p.addRequired('icFunc', validHandle);
 p.addRequired('bcFunc', validHandle);
 p.addRequired('xmesh', @validX);
 p.addRequired('t', @validT);
-if(hasODE)
+if hasODE
   p.addOptional('odeFunc', validHandle);
   p.addOptional('odeICFunc', validHandle);
   validOdeMesh = @(x) isreal(x);
@@ -50,7 +50,6 @@ p.addParameter('EqnDiagnostics', 0);
 p.addParameter('ICDiagnostics', 0);
 p.addParameter('PolyOrder', 1);
 p.addParameter('ViewMesh', 1);
-p.addParameter('AddLagMultVector', false);
 p.addParameter('DiagonalMassMatrix', 'off', validOnOff);
 validPts = @(n) isscalar(n) && n>0;
 p.addParameter('NumIntegrationPoints', 2, validPts);
@@ -66,7 +65,6 @@ pdeOpts.hasODE = hasODE;
 pdeOpts.icDiagnostics=p.Results.ICDiagnostics;
 eqnDiagnostics=p.Results.EqnDiagnostics;
 pdeOpts.eqnDiagnostics=eqnDiagnostics;
-pdeOpts.addLagMultVector = p.Results.AddLagMultVector;
 pdeOpts.useDiagMassMat = strcmpi(p.Results.DiagonalMassMatrix, 'on');
 pdeOpts.vectorized = strcmpi(p.Results.Vectorized, 'on');
 pdeOpts.numIntegrationPoints = p.Results.NumIntegrationPoints;
@@ -74,12 +72,14 @@ pdeOpts.analyticalJacobian = strcmpi(p.Results.AnalyticalJacobian, 'on');
 pdeOpts.initialSlope = p.Results.InitialSlope;
 pdeOpts.eqnDiagnosticsInitFunc = p.Results.eqnDiagnosticsInitFunc;
 
-pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts);
-
-if(hasODE)
-  pdeImpl.setODE(p.Results.odeFunc, p.Results.odeICFunc, ...
-    p.Results.odeMesh);
+if  hasODE
+  pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts, ...
+  p.Results.odeFunc, p.Results.odeICFunc, ...
+  p.Results.odeMesh);
+else
+  pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts);
 end
+
 
 if(~eqnDiagnostics)
   odeOpts=odeset('RelTol', p.Results.RelTol, ...
