@@ -26,6 +26,8 @@ classdef ODEImpl
     
     function obj = ODEImpl(xmesh, odeFunc, odeICFunc, odeMesh, ...
         t0, u2, up2, f2)
+      obj.diagnosticPrint=0;
+      obj.lagMultAlg=3;
       obj.odeFunc = odeFunc;
       obj.odeICFunc = odeICFunc;
       obj.odeMesh = odeMesh;
@@ -34,22 +36,82 @@ classdef ODEImpl
       obj.numODEVariables = length(obj.y0Ode);
       v0Dot=zeros(obj.numODEVariables,1);
       f=obj.calcODEResidual(t0, u2, up2, f2, obj.y0Ode, v0Dot);
-      obj.numODEEquations = size(f,1);
+      nOde = size(f,1);
+      obj.numODEEquations = nOde;
+      %obj.numODELagMult = obj.numODEEquations-obj.numODEVariables;
       numFEMDofs = length(u2(:));
       obj.vRange = numFEMDofs+1:numFEMDofs+obj.numODEVariables;
-      obj.eRange = numFEMDofs+1:numFEMDofs+obj.numODEEquations;
-      obj.lRange = numFEMDofs+obj.numODEVariables+1:numFEMDofs+obj.numODEEquations;
+      obj.eRange = numFEMDofs+1:numFEMDofs+nOde;
+      obj.lRange = numFEMDofs+obj.numODEVariables+1:numFEMDofs+nOde;
+      if obj.lagMultAlg
+        % for now we allow fewer vars to be initialized than the
+        % number of equations
+        numExtraVars=nOde-obj.numODEVariables;
+        v0 = [obj.y0Ode; zeros(numExtraVars,1)];
+        v0Dot = zeros(nOde,1);
+        [dfdv,dfdvDot]=obj.calcDOdeDv(t0, u2, up2, f2, v0, v0Dot);
+        if obj.lagMultAlg==1
+          obj.lagMultEqns=~any(dfdv|dfdvDot, 2);
+        elseif obj.lagMultAlg==2 || obj.lagMultAlg==3
+          varUsed=zeros(nOde,1);
+          obj.lagMultEqns=true(nOde,1);
+          % check each eqn for ode variables starting at diagonal
+          for i=1:nOde
+            for j=1:nOde
+              ii = mod((i+j-2),nOde)+1;
+              if (dfdv(i,ii) || dfdvDot(i,ii)) && ~varUsed(ii)
+                obj.lagMultEqns(i) = false;
+                varUsed(i)=1;
+                break;
+              end
+            end
+          end
+        elseif obj.lagMultAlg==4
+          dFdu=self.calcDOdeDu(t0, u2, up2, f2, v, v0Dot);
+          obj.lagMultEqns=any(dFdu,2);
+        end
+        if obj.diagnosticPrint
+          prtMat(dfdv, 'dfdv');
+          prtMat(dfdvDot, 'dfdvDot');
+          %prtShortVec(diag(dfdv), 'dfdv');
+          %prtShortVec(diag(dfdvDot), 'dfdvDot');
+          prtShortVec(obj.lagMultEqns, 'lagMultEqns');
+          %obj.lagMultEqns=abs(diag(dfdv))<eps & abs(diag(dfdvDot))<eps;
+          fprintf('numODELagMult=%d, %d\n', obj.numODELagMult, ...
+            sum(obj.lagMultEqns));
+        end
+        obj.numODELagMult = sum(obj.lagMultEqns);
+      else
+        obj.numODELagMult = obj.numODEEquations-obj.numODEVariables;
+      end
     end
     
-    function [R,Rdot]=updateResiduals(self, time, u, up, u2, up2, f2, RFem, RdotFem)
-      % FIXME should get u2 and up2 from u and up also
-      v = self.getVFromSysVec(u);
-      vDot = self.getVFromSysVec(up);
+    function [R,Rdot]=updateResiduals(self, time, u, up, F, RFem, RdotFem)
+      v=u.ode;
+      vDot=up.ode;
+      u2=u.fem2;
+      up2=up.fem2;
+      f2=F.fem2;
       f=self.calcODEResidual(time, u2, up2, f2, v, vDot);
-      if(self.numODEEquations > self.numODEVariables)
-        L=self.getLFromSysVec(u);
+      if(self.numODELagMult)
         dFdu=self.calcDOdeDu(time, u2, up2, f2, v, vDot);
-        RFem = RFem + dFdu(self.numODEVariables+1:end,:)'*L; % add constraint contribution
+        dFdv=self.calcDOdeDv(time, u2, up2, f2, v, vDot);
+        if self.lagMultAlg
+          L=v(self.lagMultEqns);
+          Rtmp = u.new(dFdu(self.lagMultEqns,:)'*L);
+          r2=Rtmp.fem2;
+          r2(:,1)=0; r2(:,end)=0; % zero BC terms
+          %RFem = RFem + dFdu(self.lagMultEqns,:)'*L;
+          RFem = RFem + r2(:);
+          if self.lagMultAlg==2
+            f = f + dFdv(self.lagMultEqns,:)'*L;
+          end
+        else
+          L=self.getLFromSysVec(u.all);
+          % add constraint contribution
+          RFem = RFem + dFdu(self.numODEVariables+1:end,:)'*L;
+          f = f + dFdv(self.numODEVariables+1:end,:)'*L;
+        end
       end
       R=[RFem(:);f(:)];
       % f contains the total residual from ODE equations
@@ -69,7 +131,7 @@ classdef ODEImpl
     end
     
    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u2, up2, f2, v, vDot)
-      mOde = self.numODEVariables;
+      mOde = self.numODEEquations;
       mm = self.meshMapper;
       uOde=mm.mapFunction(u2);
       upOde=mm.mapFunction(up2);
@@ -93,6 +155,9 @@ classdef ODEImpl
         dFdv(:,i) = (fp-f0)/h;
         v(i) = vSave;
       end
+      if nargout < 2
+        return;
+      end
       dFdvDot = zeros(mOde, mOde);
       for i=1:mOde
         vDotSave = vDot(i);
@@ -105,7 +170,7 @@ classdef ODEImpl
       end
    end
  
-   function dFdu=calcDOdeDu(self, time, u2, up2, f2, v, vDot)
+   function [dFdu,dFduDot]=calcDOdeDu(self, time, u2, up2, f2, v, vDot)
      [numDepVars,numNodes] = size(u2);
      numFEMEqns = numDepVars*numNodes;
      mm = self.meshMapper;
@@ -136,11 +201,30 @@ classdef ODEImpl
        end
      end
      dFdu = reshape(dFdu, self.numODEEquations, numFEMEqns);
+     if nargout < 2
+       return;
+     end
+     dFduDot = zerosLike(self.numODEEquations, numDepVars, numNodes, up2);
+     for i=1:numNodes
+       for j=1:numDepVars
+         upsave = up2(j,i);
+         h = sqrtEps * max(upsave, 1);
+         up2(j,i) = up2(j,i) + h;
+         upOde=mm.mapFunction(up2);
+         dupdxOde=mm.mapFunctionDer(up2);
+         f = callVarargFunc(self.odeFunc, ...
+           {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+         dFduDot(:,j,i) = (f-f0)/h;
+         up2(j,i) = upsave;
+       end
+     end
+     dFduDot = reshape(dFdu, self.numODEEquations, numFEMEqns);
    end
    
    function vode=getVFromSysVec(self,v)
      v=v(:);
      vode = v(self.vRange);
+     %vode = v(self.eRange);
    end
    
    function vode=getDOFsFromSysVec(self,v)
@@ -151,7 +235,7 @@ classdef ODEImpl
     function vode=getLFromSysVec(self,v)
      v=v(:);
      vode = v(self.lRange);
-   end
+    end
 
   end
   
@@ -164,6 +248,8 @@ classdef ODEImpl
     numODELagMult;
     meshMapper;
     vRange, eRange, lRange;
+    lagMultAlg, lagMultEqns;
+    diagnosticPrint;
   end
   
 end

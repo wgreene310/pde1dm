@@ -85,24 +85,6 @@ classdef PDE1dImpl < handle
     
     end
     
-    function setODE(self, odeFunc, odeICFunc, odeMesh)
-      v0=odeICFunc();
-      nV = size(v0,1);
-      v0Dot = zeros(nV,1);
-      t0 = self.tspan(1);
-      yp0 = zeros(self.numFEMEqns, 1);
-      [F, S,Cxd] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
-      u2 = self.femU2FromSysVec(self.y0);
-      up2 = self.femU2FromSysVec(yp0);
-      f2 = self.femU2FromSysVec(F);
-      self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
-        odeMesh, t0, u2, up2, f2);
-      numODEEqn = self.odeImpl.numODEEquations;
-      self.totalNumEqns = self.numFEMEqns + numODEEqn;
-      % there can be more ODE equations than ODE variables if
-      %  some of the ODE equations are just constraints on the FEM dofs
-      self.y0 = [self.y0FEM(:); v0; zeros(numODEEqn-nV,1)];
-    end
 		
     function [u,varargout]=solveTransient(self, odeOpts)
       
@@ -344,12 +326,33 @@ classdef PDE1dImpl < handle
         [dFdv,dFdvDot]=self.odeImpl.calcDOdeDv(0, u2, up2, f2, v, vDot);
         prtMat(dFdv, 'dFdv', 1, '%10g');
         prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
+        dFdu=self.odeImpl.calcDOdeDu(0, u2, up2, f2, v, vDot);
+        prtMat(dFdu, 'dFdu', 1, '%10g');
       end
     end
     
   end % methods
 	
-	methods(Access=private)
+  methods(Access=private)
+    
+    function setODE(self, odeFunc, odeICFunc, odeMesh)
+      v0=odeICFunc();
+      nV = size(v0,1);
+      v0Dot = zeros(nV,1);
+      t0 = self.tspan(1);
+      yp0 = zeros(self.numFEMEqns, 1);
+      [F, S,Cxd] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
+      u2 = self.femU2FromSysVec(self.y0);
+      up2 = self.femU2FromSysVec(yp0);
+      f2 = self.femU2FromSysVec(F);
+      self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
+        odeMesh, t0, u2, up2, f2);
+      numODEEqn = self.odeImpl.numODEEquations;
+      self.totalNumEqns = self.numFEMEqns + numODEEqn;
+      % there can be more ODE equations than ODE variables if
+      %  some of the ODE equations are just constraints on the FEM dofs
+      self.y0 = [self.y0FEM(:); v0; zeros(numODEEqn-nV,1)];
+    end
 
     function jac=calcJacobian(self, time, u, up)
       u=u(:);
@@ -426,11 +429,11 @@ classdef PDE1dImpl < handle
       %R = Cxd-R;
       %R=-R;
       if self.hasODE
-        u2 = self.femU2FromSysVec(u);
-        up2 = self.femU2FromSysVec(up);
-        f2 = self.femU2FromSysVec(F);
-        [R,Cxd]=self.odeImpl.updateResiduals(time, u, up, ...
-          u2, up2, f2, R, Cxd);
+        us=SysVec(u, self.numNodes, self.numDepVars);
+        ups=SysVec(up, self.numNodes, self.numDepVars);
+        fs=SysVec(F, self.numNodes, self.numDepVars);
+        [R,Cxd]=self.odeImpl.updateResiduals(time, us, ups, ...
+          fs, R, Cxd);
       end
       % add constraints
       [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
@@ -452,6 +455,10 @@ classdef PDE1dImpl < handle
       %[pl,ql,pr,qr] = self.bcFunc(x(1), u2(:,1),x(end),u2(:,end),time);
       [pl,ql,pr,qr] = callVarargFunc(self.bcFunc, ...
         {xl, u2(:,1),xr,u2(:,end),time,v, vDot});
+      self.checkBCSize(pl);
+      self.checkBCSize(ql);
+      self.checkBCSize(pr);
+      self.checkBCSize(qr);
       rightDofOff = self.numFEMEqns - self.numDepVars;
       m=self.mCoord;
       sing = m~=0 && xl==0;
@@ -739,6 +746,15 @@ classdef PDE1dImpl < handle
       v2 = reshape(v(1:self.numFEMEqns), self.numDepVars, []);
     end
     
+    function checkBCSize(self, bc)
+      sb = size(bc);
+      if any(sb ~= [self.numDepVars 1])
+        bcName = inputname(2);
+        bcErrMsg = 'Size of "%s" must be %d X 1';
+        error('pde1d:bcSize', bcErrMsg, bcName, sb(1));
+      end
+    end
+    
 	end % methods
   
   methods(Access=private, Static)
@@ -772,3 +788,4 @@ classdef PDE1dImpl < handle
   end
   
 end % classdef
+
