@@ -346,7 +346,7 @@ classdef PDE1dImpl < handle
       up2 = self.femU2FromSysVec(yp0);
       f2 = self.femU2FromSysVec(F);
       self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
-        odeMesh, t0, u2, up2, f2);
+        odeMesh, t0, u2, up2, f2, self.pdeOpts.testFunctionDOFMap);
       numODEEqn = self.odeImpl.numODEEquations;
       self.totalNumEqns = self.numFEMEqns + numODEEqn;
       % there can be more ODE equations than ODE variables if

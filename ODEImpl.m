@@ -25,7 +25,10 @@ classdef ODEImpl
   methods
     
     function obj = ODEImpl(xmesh, odeFunc, odeICFunc, odeMesh, ...
-        t0, u2, up2, f2)
+        t0, u2, up2, f2, testFunctionDOFMap)
+      if nargin < 9
+        testFunctionDOFMap = [];
+      end
       obj.diagnosticPrint=0;
       obj.lagMultAlg=3;
       obj.odeFunc = odeFunc;
@@ -84,6 +87,19 @@ classdef ODEImpl
       else
         obj.numODELagMult = obj.numODEEquations-obj.numODEVariables;
       end
+      
+      if isempty(testFunctionDOFMap)
+        obj.testFunctionIndex=[];
+      else
+        [numFEMDof, numFEMNodes]=size(u2);
+        if numFEMDof ~= length(testFunctionDOFMap)
+          error('pde1d:testFunctionDOFMapSize', ...
+            'Length of testFunctionDOFMap must equal the number of PDE');
+        end
+        ii = repmat((0:numFEMNodes-1)*numFEMDof, numFEMDof, 1);
+        tfi = repmat(testFunctionDOFMap(:), 1, numFEMNodes) + ii;
+        obj.testFunctionIndex = tfi(:);
+      end
     end
     
     function [R,Rdot]=updateResiduals(self, time, u, up, F, RFem, RdotFem)
@@ -102,7 +118,12 @@ classdef ODEImpl
           r2=Rtmp.fem2;
           r2(:,1)=0; r2(:,end)=0; % zero BC terms
           %RFem = RFem + dFdu(self.lagMultEqns,:)'*L;
-          RFem = RFem + r2(:);
+          dm = self.testFunctionIndex;
+          if isempty(dm)
+            RFem = RFem + r2(:);
+          else
+            RFem(dm) = RFem(dm) + r2(:);
+          end
           if self.lagMultAlg==2
             f = f + dFdv(self.lagMultEqns,:)'*L;
           end
@@ -250,6 +271,7 @@ classdef ODEImpl
     vRange, eRange, lRange;
     lagMultAlg, lagMultEqns;
     diagnosticPrint;
+    testFunctionIndex;
   end
   
 end

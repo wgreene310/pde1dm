@@ -22,6 +22,7 @@ classdef PDEOptions
     vectorized, numIntegrationPoints, hasODE, analyticalJacobian;
     initialSlope, eqnDiagnosticsInitFunc, isOctave;
     useInternalNumJac;
+    testFunctionDOFMap;
   end
   
   methods
@@ -41,6 +42,7 @@ classdef PDEOptions
       else
         obj.useInternalNumJac=false;
       end
+      obj.testFunctionDOFMap = [];
     end
   end
 end

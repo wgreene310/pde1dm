@@ -57,6 +57,8 @@ p.addParameter('AnalyticalJacobian', 'off', validOnOff);
 p.addParameter('InitialSlope', [], validHandle);
 validInitFunc = @(x) isempty(x) || validHandle(x);
 p.addParameter('eqnDiagnosticsInitFunc', [], validInitFunc);
+validDOFMap = @(x) all(isfinite(x) & x==floor(x) & x>0);
+p.addParameter('testFunctionDOFMap', [], validDOFMap);
 p.parse(m,pde,ic,bc,xmesh,t,varargin{:});
 %p.Results
 
@@ -71,6 +73,7 @@ pdeOpts.numIntegrationPoints = p.Results.NumIntegrationPoints;
 pdeOpts.analyticalJacobian = strcmpi(p.Results.AnalyticalJacobian, 'on');
 pdeOpts.initialSlope = p.Results.InitialSlope;
 pdeOpts.eqnDiagnosticsInitFunc = p.Results.eqnDiagnosticsInitFunc;
+pdeOpts.testFunctionDOFMap = p.Results.testFunctionDOFMap;
 
 if  hasODE
   pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts, ...
