@@ -326,8 +326,9 @@ classdef PDE1dImpl < handle
         [dFdv,dFdvDot]=self.odeImpl.calcDOdeDv(0, u2, up2, f2, v, vDot);
         prtMat(dFdv, 'dFdv', 1, '%10g');
         prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
-        dFdu=self.odeImpl.calcDOdeDu(0, u2, up2, f2, v, vDot);
+        [dFdu,dFduDot]=self.odeImpl.calcDOdeDu(0, u2, up2, f2, v, vDot);
         prtMat(dFdu, 'dFdu', 1, '%10g');
+        prtMat(dFduDot, 'dFduDot', 1, '%10g');
       end
     end
     
