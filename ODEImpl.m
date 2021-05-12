@@ -109,20 +109,25 @@ classdef ODEImpl
       up2=up.fem2;
       f2=F.fem2;
       f=self.calcODEResidual(time, u2, up2, f2, v, vDot);
+      fdot=zeros(self.numODEEquations,1);
       if(self.numODELagMult)
-        dFdu=self.calcDOdeDu(time, u2, up2, f2, v, vDot);
+        [dFdu,dFduDot]=self.calcDOdeDu(time, u2, up2, f2, v, vDot);
         dFdv=self.calcDOdeDv(time, u2, up2, f2, v, vDot);
         if self.lagMultAlg
           L=v(self.lagMultEqns);
           Rtmp = u.new(dFdu(self.lagMultEqns,:)'*L);
           r2=Rtmp.fem2;
           r2(:,1)=0; r2(:,end)=0; % zero BC terms
-          %RFem = RFem + dFdu(self.lagMultEqns,:)'*L;
+          Rdottmp = u.new(dFduDot(self.lagMultEqns,:)'*L);
+          rd2=Rdottmp.fem2;
+          rd2(:,1)=0; rd2(:,end)=0; % zero BC terms
           dm = self.testFunctionIndex;
           if isempty(dm)
             RFem = RFem + r2(:);
+            RdotFem = RdotFem + rd2(:);
           else
             RFem(dm) = RFem(dm) + r2(:);
+            RdotFem(dm) = RdotFem(dm) + rd2(:);
           end
           if self.lagMultAlg==2
             f = f + dFdv(self.lagMultEqns,:)'*L;
@@ -135,9 +140,7 @@ classdef ODEImpl
         end
       end
       R=[RFem(:);f(:)];
-      % f contains the total residual from ODE equations
-      % (there is no separate inertia term)
-      Rdot=[RdotFem; zeros(self.numODEEquations,1)];
+      Rdot=[RdotFem; fdot(:)];
     end
     
     function f=calcODEResidual(self, time, u2, up2, f2, v, vDot)
@@ -151,7 +154,7 @@ classdef ODEImpl
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
     end
     
-   function [dFdv,dFdvDot]=calcDOdeDv(self, time, u2, up2, f2, v, vDot)
+    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u2, up2, f2, v, vDot)
       mOde = self.numODEEquations;
       mm = self.meshMapper;
       uOde=mm.mapFunction(u2);
@@ -189,75 +192,75 @@ classdef ODEImpl
         dFdvDot(:,i) = (fp-f0)/h;
         vDot(i) = vDotSave;
       end
-   end
- 
-   function [dFdu,dFduDot]=calcDOdeDu(self, time, u2, up2, f2, v, vDot)
-     [numDepVars,numNodes] = size(u2);
-     numFEMEqns = numDepVars*numNodes;
-     mm = self.meshMapper;
-     uOde=mm.mapFunction(u2);
-     upOde=mm.mapFunction(up2);
-     dudxOde=mm.mapFunctionDer(u2);
-     fluxOde = mm.mapFunction(f2);
-     dupdxOde=mm.mapFunctionDer(up2);
-     f0 = callVarargFunc(self.odeFunc, ...
-       {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
-     if size(f0,1) ~= self.numODEEquations
-       error('Number of rows returned from ODE function must be %d.\n', ...
-         self.numODEEquations);
-     end
-     sqrtEps = sqrt(eps);
-     dFdu = zerosLike(self.numODEEquations, numDepVars, numNodes, u2);
-     for i=1:numNodes
-       for j=1:numDepVars
-         usave = u2(j,i);
-         h = sqrtEps * max(usave, 1);
-         u2(j,i) = u2(j,i) + h;
-         uOde=mm.mapFunction(u2);
-         dudxOde=mm.mapFunctionDer(u2);
-         f = callVarargFunc(self.odeFunc, ...
-           {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
-         dFdu(:,j,i) = (f-f0)/h;
-         u2(j,i) = usave;
-       end
-     end
-     dFdu = reshape(dFdu, self.numODEEquations, numFEMEqns);
-     if nargout < 2
-       return;
-     end
-     dFduDot = zerosLike(self.numODEEquations, numDepVars, numNodes, up2);
-     for i=1:numNodes
-       for j=1:numDepVars
-         upsave = up2(j,i);
-         h = sqrtEps * max(upsave, 1);
-         up2(j,i) = up2(j,i) + h;
-         upOde=mm.mapFunction(up2);
-         dupdxOde=mm.mapFunctionDer(up2);
-         f = callVarargFunc(self.odeFunc, ...
-           {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
-         dFduDot(:,j,i) = (f-f0)/h;
-         up2(j,i) = upsave;
-       end
-     end
-     dFduDot = reshape(dFdu, self.numODEEquations, numFEMEqns);
-   end
-   
-   function vode=getVFromSysVec(self,v)
-     v=v(:);
-     vode = v(self.vRange);
-     %vode = v(self.eRange);
-   end
-   
-   function vode=getDOFsFromSysVec(self,v)
-     v=v(:);
-     vode = v(self.eRange);
-   end
-   
-    function vode=getLFromSysVec(self,v)
-     v=v(:);
-     vode = v(self.lRange);
     end
-
+    
+    function [dFdu,dFduDot]=calcDOdeDu(self, time, u2, up2, f2, v, vDot)
+      [numDepVars,numNodes] = size(u2);
+      numFEMEqns = numDepVars*numNodes;
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      upOde=mm.mapFunction(up2);
+      dudxOde=mm.mapFunctionDer(u2);
+      fluxOde = mm.mapFunction(f2);
+      dupdxOde=mm.mapFunctionDer(up2);
+      f0 = callVarargFunc(self.odeFunc, ...
+        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+      if size(f0,1) ~= self.numODEEquations
+        error('Number of rows returned from ODE function must be %d.\n', ...
+          self.numODEEquations);
+      end
+      sqrtEps = sqrt(eps);
+      dFdu = zerosLike(self.numODEEquations, numDepVars, numNodes, u2);
+      for i=1:numNodes
+        for j=1:numDepVars
+          usave = u2(j,i);
+          h = sqrtEps * max(usave, 1);
+          u2(j,i) = u2(j,i) + h;
+          uOde=mm.mapFunction(u2);
+          dudxOde=mm.mapFunctionDer(u2);
+          f = callVarargFunc(self.odeFunc, ...
+            {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+          dFdu(:,j,i) = (f-f0)/h;
+          u2(j,i) = usave;
+        end
+      end
+      dFdu = reshape(dFdu, self.numODEEquations, numFEMEqns);
+      if nargout < 2
+        return;
+      end
+      dFduDot = zerosLike(self.numODEEquations, numDepVars, numNodes, up2);
+      for i=1:numNodes
+        for j=1:numDepVars
+          upsave = up2(j,i);
+          h = sqrtEps * max(upsave, 1);
+          up2(j,i) = up2(j,i) + h;
+          upOde=mm.mapFunction(up2);
+          dupdxOde=mm.mapFunctionDer(up2);
+          f = callVarargFunc(self.odeFunc, ...
+            {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+          dFduDot(:,j,i) = (f-f0)/h;
+          up2(j,i) = upsave;
+        end
+      end
+      dFduDot = reshape(dFduDot, self.numODEEquations, numFEMEqns);
+    end
+    
+    function vode=getVFromSysVec(self,v)
+      v=v(:);
+      vode = v(self.vRange);
+      %vode = v(self.eRange);
+    end
+    
+    function vode=getDOFsFromSysVec(self,v)
+      v=v(:);
+      vode = v(self.eRange);
+    end
+    
+    function vode=getLFromSysVec(self,v)
+      v=v(:);
+      vode = v(self.lRange);
+    end
+    
   end
   
   methods(Access=private)
