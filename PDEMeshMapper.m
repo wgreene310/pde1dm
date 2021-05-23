@@ -17,6 +17,9 @@
 %   Copyright (C) 2016-2020 William H. Greene
 classdef PDEMeshMapper
   
+  %% Map a solution and derivatives from FEM nodes to arbitrary points
+  %% in the region.
+  
   properties
     srcMesh, destMesh;
     destMeshElemIndex, destMeshParamVals;

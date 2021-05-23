@@ -17,6 +17,9 @@
 %   Copyright (C) 2016-2021 William H. Greene
 
 classdef PDEOptions
+  
+  %% All the user-settable options for the PDE solver.
+  
   properties
     icDiagnostics, eqnDiagnostics, useDiagMassMat;
     vectorized, numIntegrationPoints, hasODE, analyticalJacobian;

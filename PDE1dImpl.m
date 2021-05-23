@@ -17,6 +17,8 @@
 % Copyright (C) 2016-2021 William H. Greene
 
 classdef PDE1dImpl < handle
+  
+  %% Main implementaton class for PDE solver.
 
   properties
      xmesh, tspan;

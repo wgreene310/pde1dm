@@ -18,6 +18,8 @@
 
 classdef GaussianIntegrationRule
   
+  %% Gaussian integration points and weights for 1D, 2D, and 3D regions.
+  
   properties
     points, wts;
   end

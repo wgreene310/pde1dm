@@ -18,6 +18,9 @@
 
 classdef SysVec
   
+  %% Represent a solution vector with finite element
+  %% and ODE DOFs.
+  
   methods
     function obj = SysVec(v, numFEMNodes, numDepVars)
       obj.dataVector = v;
@@ -56,8 +59,7 @@ classdef SysVec
     end
   end
   
-  %properties(Access=private)
-  properties
+  properties(Access=private)
     dataVector, numFEMNodes, numDepVars;
     numFEMEqns;
   end

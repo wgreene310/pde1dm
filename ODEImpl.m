@@ -18,6 +18,8 @@
 
 classdef ODEImpl
   
+  %% Encapsulate the representation of additional ODE appended to FE model
+  
   properties
     numODEVariables, numODEEquations;
   end
