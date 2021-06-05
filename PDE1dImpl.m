@@ -142,7 +142,7 @@ classdef PDE1dImpl < handle
         icopts.RelTol=reltol;
         icopts.icdiagnostics=icdiag;
         y0Save = self.y0;
-        if(0)
+        if 0
           [y0,yp0]=decic(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0);
         else
           [y0,yp0]=decicShampine(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0,icopts);

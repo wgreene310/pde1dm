@@ -78,8 +78,6 @@ classdef ODEImpl
         if obj.diagnosticPrint
           prtMat(dfdv, 'dfdv');
           prtMat(dfdvDot, 'dfdvDot');
-          %prtShortVec(diag(dfdv), 'dfdv');
-          %prtShortVec(diag(dfdvDot), 'dfdvDot');
           prtShortVec(obj.lagMultEqns, 'lagMultEqns');
           %obj.lagMultEqns=abs(diag(dfdv))<eps & abs(diag(dfdvDot))<eps;
           fprintf('numODELagMult=%d, %d\n', obj.numODELagMult, ...
@@ -213,7 +211,9 @@ classdef ODEImpl
       end
       sqrtEps = sqrt(eps);
       dFdu = zerosLike(self.numODEEquations, numDepVars, numNodes, u2);
-      for i=1:numNodes
+      dni = mm.destNodeIndex;
+      for ii=1:length(dni)
+        i = dni(ii);
         for j=1:numDepVars
           usave = u2(j,i);
           h = sqrtEps * max(usave, 1);
@@ -230,8 +230,11 @@ classdef ODEImpl
       if nargout < 2
         return;
       end
+      uOde=mm.mapFunction(u2);
+      dudxOde=mm.mapFunctionDer(u2);
       dFduDot = zerosLike(self.numODEEquations, numDepVars, numNodes, up2);
-      for i=1:numNodes
+      for ii=1:length(dni)
+        i = dni(ii);
         for j=1:numDepVars
           upsave = up2(j,i);
           h = sqrtEps * max(upsave, 1);
