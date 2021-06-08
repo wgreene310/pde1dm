@@ -322,15 +322,10 @@ classdef PDE1dImpl < handle
       R = self.calcResidual(0, u, up, depVarClassType);
       self.printSystemVector(R, 'R', 1, '%20.10g');
       if self.hasODE
-        u2 = self.femU2FromSysVec(u);
-        up2 = self.femU2FromSysVec(up);
-        f2 = self.femU2FromSysVec(F);        
-        [dFdv,dFdvDot]=self.odeImpl.calcDOdeDv(0, u2, up2, f2, v, vDot);
-        prtMat(dFdv, 'dFdv', 1, '%10g');
-        prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
-        [dFdu,dFduDot]=self.odeImpl.calcDOdeDu(0, u2, up2, f2, v, vDot);
-        prtMat(dFdu, 'dFdu', 1, '%10g');
-        prtMat(dFduDot, 'dFduDot', 1, '%10g');
+        us=SysVec(u, self.numNodes, self.numDepVars);
+        ups=SysVec(up, self.numNodes, self.numDepVars);
+        fs=SysVec(F, self.numNodes, self.numDepVars);
+        self.odeImpl.testFuncs(us, ups, fs, v, vDot);
       end
     end
     

@@ -266,6 +266,29 @@ classdef ODEImpl
       vode = v(self.lRange);
     end
     
+    function testFuncs(self, u, up, f, v, vDot)
+      u2=u.fem2;
+      up2=up.fem2;
+      f2=f.fem2;
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      prtMat(uOde, 'uOde', 1, '%10g');
+      upOde=mm.mapFunction(up2);
+      prtMat(upOde, 'upOde', 1, '%10g');
+      dudxOde=mm.mapFunctionDer(u2);
+      prtMat(dudxOde, 'dudxOde', 1, '%10g');
+      fluxOde = mm.mapFunction(f2);
+      prtMat(fluxOde, 'fluxOde', 1, '%10g');
+      dupdxOde=mm.mapFunctionDer(up2);
+      prtMat(dupdxOde, 'dupdxOde', 1, '%10g');
+      [dFdv,dFdvDot]=self.calcDOdeDv(0, u2, up2, f2, v, vDot);
+      prtMat(dFdv, 'dFdv', 1, '%10g');
+      prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
+      [dFdu,dFduDot]=self.calcDOdeDu(0, u2, up2, f2, v, vDot);
+      prtMat(dFdu, 'dFdu', 1, '%10g');
+      prtMat(dFduDot, 'dFduDot', 1, '%10g');
+    end
+    
   end
   
   methods(Access=private)
