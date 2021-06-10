@@ -148,7 +148,8 @@ classdef PDE1dImpl < handle
           [y0,yp0]=decicShampine(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0,icopts);
         end
         if(icdiag)
-          fprintf('max change, y0=%g\n', max(abs(y0-y0Save)));
+          [maxChg, indMax] = max(abs(y0-y0Save));
+          fprintf('max change, y0=%g at equation %d\n', maxChg, indMax);
           prtShortVec(y0, 'y0');
           prtShortVec(yp0, 'yp0', 1, '%16.10g');
         end
@@ -299,7 +300,7 @@ classdef PDE1dImpl < handle
         return
       end
       depVarClassType=u;
-      [F, S,Cxd] = calcFEMEqns(self, 0, uFEM, upFEM, v, vDot, depVarClassType);
+      [F, S,Cxd, fIntPts] = calcFEMEqns(self, 0, uFEM, upFEM, v, vDot, depVarClassType);
       self.printSystemVector(S, 'S', 1, '%16.8e');
       self.printSystemVector(F, 'F', 1, '%16.8e');
       self.printSystemVector(Cxd, 'Cxd', 1, '%16.8e');
@@ -324,8 +325,7 @@ classdef PDE1dImpl < handle
       if self.hasODE
         us=SysVec(u, self.numNodes, self.numDepVars);
         ups=SysVec(up, self.numNodes, self.numDepVars);
-        fs=SysVec(F, self.numNodes, self.numDepVars);
-        self.odeImpl.testFuncs(us, ups, fs, v, vDot);
+        self.odeImpl.testFuncs(us, ups, self.xPts, fIntPts, v, vDot);
       end
     end
     
@@ -339,12 +339,11 @@ classdef PDE1dImpl < handle
       v0Dot = zeros(nV,1);
       t0 = self.tspan(1);
       yp0 = zeros(self.numFEMEqns, 1);
-      [F, S,Cxd] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
+      [F, S,Cxd,fIntPts] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
       u2 = self.femU2FromSysVec(self.y0);
       up2 = self.femU2FromSysVec(yp0);
-      f2 = self.femU2FromSysVec(F);
       self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
-        odeMesh, t0, u2, up2, f2, self.pdeOpts.testFunctionDOFMap);
+        odeMesh, t0, u2, up2, self.xPts, fIntPts, self.pdeOpts.testFunctionDOFMap);
       numODEEqn = self.odeImpl.numODEEquations;
       self.totalNumEqns = self.numFEMEqns + numODEEqn;
       % there can be more ODE equations than ODE variables if
@@ -422,16 +421,15 @@ classdef PDE1dImpl < handle
         uFEM = u;
         upFEM = up;
       end
-      [F, S,Cxd] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
+      [F, S,Cxd, fIntPts] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
       R = F-S;
       %R = Cxd-R;
       %R=-R;
       if self.hasODE
         us=SysVec(u, self.numNodes, self.numDepVars);
         ups=SysVec(up, self.numNodes, self.numDepVars);
-        fs=SysVec(F, self.numNodes, self.numDepVars);
         [R,Cxd]=self.odeImpl.updateResiduals(time, us, ups, ...
-          fs, R, Cxd);
+          self.xPts, fIntPts, R, Cxd);
       end
       % add constraints
       [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
@@ -494,7 +492,7 @@ classdef PDE1dImpl < handle
      R = -R;
     end
     
-    function [F, S, Cv] = calcFEMEqns(self, t, u,up, v, vDot, depVarClassType)
+    function [F, S, Cv, f] = calcFEMEqns(self, t, u,up, v, vDot, depVarClassType)
       ndv=self.numDepVars;
       nn  = self.numNodes;
       Cv = zerosLike(ndv, nn, depVarClassType);

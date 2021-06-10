@@ -27,7 +27,7 @@ classdef ODEImpl
   methods
     
     function obj = ODEImpl(xmesh, odeFunc, odeICFunc, odeMesh, ...
-        t0, u2, up2, f2, testFunctionDOFMap)
+        t0, u2, up2, xIntPts, fIntPts, testFunctionDOFMap)
       if nargin < 9
         testFunctionDOFMap = [];
       end
@@ -40,7 +40,8 @@ classdef ODEImpl
       obj.y0Ode = odeICFunc();
       obj.numODEVariables = length(obj.y0Ode);
       v0Dot=zeros(obj.numODEVariables,1);
-      f=obj.calcODEResidual(t0, u2, up2, f2, obj.y0Ode, v0Dot);
+      fOde=obj.calcFOdePts(xIntPts, fIntPts);
+      f=obj.calcODEResidual(t0, u2, up2, fOde, obj.y0Ode, v0Dot);
       nOde = size(f,1);
       obj.numODEEquations = nOde;
       %obj.numODELagMult = obj.numODEEquations-obj.numODEVariables;
@@ -54,7 +55,7 @@ classdef ODEImpl
         numExtraVars=nOde-obj.numODEVariables;
         v0 = [obj.y0Ode; zeros(numExtraVars,1)];
         v0Dot = zeros(nOde,1);
-        [dfdv,dfdvDot]=obj.calcDOdeDv(t0, u2, up2, f2, v0, v0Dot);
+        [dfdv,dfdvDot]=obj.calcDOdeDv(t0, u2, up2, fOde, v0, v0Dot);
         if obj.lagMultAlg==1
           obj.lagMultEqns=~any(dfdv|dfdvDot, 2);
         elseif obj.lagMultAlg==2 || obj.lagMultAlg==3
@@ -72,7 +73,7 @@ classdef ODEImpl
             end
           end
         elseif obj.lagMultAlg==4
-          dFdu=self.calcDOdeDu(t0, u2, up2, f2, v, v0Dot);
+          dFdu=self.calcDOdeDu(t0, u2, up2, fOde, v, v0Dot);
           obj.lagMultEqns=any(dFdu,2);
         end
         if obj.diagnosticPrint
@@ -102,17 +103,18 @@ classdef ODEImpl
       end
     end
     
-    function [R,Rdot]=updateResiduals(self, time, u, up, F, RFem, RdotFem)
+    function [R,Rdot]=updateResiduals(self, time, u, up, ...
+        xIntPts, fIntPts, RFem, RdotFem)
       v=u.ode;
       vDot=up.ode;
       u2=u.fem2;
       up2=up.fem2;
-      f2=F.fem2;
-      f=self.calcODEResidual(time, u2, up2, f2, v, vDot);
+      fOde=self.calcFOdePts(xIntPts, fIntPts);
+      f=self.calcODEResidual(time, u2, up2, fOde, v, vDot);
       fdot=zeros(self.numODEEquations,1);
       if(self.numODELagMult)
-        [dFdu,dFduDot]=self.calcDOdeDu(time, u2, up2, f2, v, vDot);
-        dFdv=self.calcDOdeDv(time, u2, up2, f2, v, vDot);
+        [dFdu,dFduDot]=self.calcDOdeDu(time, u2, up2, fOde, v, vDot);
+        dFdv=self.calcDOdeDv(time, u2, up2, fOde, v, vDot);
         if self.lagMultAlg
           L=v(self.lagMultEqns);
           Rtmp = u.new(dFdu(self.lagMultEqns,:)'*L);
@@ -143,24 +145,12 @@ classdef ODEImpl
       Rdot=[RdotFem; fdot(:)];
     end
     
-    function f=calcODEResidual(self, time, u2, up2, f2, v, vDot)
-      mm = self.meshMapper;
-      uOde=mm.mapFunction(u2);
-      upOde=mm.mapFunction(up2);
-      dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
-      dupdxOde=mm.mapFunctionDer(up2);
-      f = callVarargFunc(self.odeFunc, ...
-        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
-    end
-    
-    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u2, up2, f2, v, vDot)
+    function [dFdv,dFdvDot]=calcDOdeDv(self, time, u2, up2, fluxOde, v, vDot)
       mOde = self.numODEEquations;
       mm = self.meshMapper;
       uOde=mm.mapFunction(u2);
       upOde=mm.mapFunction(up2);
       dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
       dupdxOde=mm.mapFunctionDer(up2);
       f0 = callVarargFunc(self.odeFunc, ...
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
@@ -194,14 +184,13 @@ classdef ODEImpl
       end
     end
     
-    function [dFdu,dFduDot]=calcDOdeDu(self, time, u2, up2, f2, v, vDot)
+    function [dFdu,dFduDot]=calcDOdeDu(self, time, u2, up2, fluxOde, v, vDot)
       [numDepVars,numNodes] = size(u2);
       numFEMEqns = numDepVars*numNodes;
       mm = self.meshMapper;
       uOde=mm.mapFunction(u2);
       upOde=mm.mapFunction(up2);
       dudxOde=mm.mapFunctionDer(u2);
-      fluxOde = mm.mapFunction(f2);
       dupdxOde=mm.mapFunctionDer(up2);
       f0 = callVarargFunc(self.odeFunc, ...
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
@@ -266,32 +255,45 @@ classdef ODEImpl
       vode = v(self.lRange);
     end
     
-    function testFuncs(self, u, up, f, v, vDot)
+    function testFuncs(self, u, up, xIntPts, fIntPts, v, vDot)
       u2=u.fem2;
       up2=up.fem2;
-      f2=f.fem2;
       mm = self.meshMapper;
       uOde=mm.mapFunction(u2);
-      prtMat(uOde, 'uOde', 1, '%10g');
+      prtMat(uOde, 'uOde', 1, '%12g');
       upOde=mm.mapFunction(up2);
-      prtMat(upOde, 'upOde', 1, '%10g');
+      prtMat(upOde, 'upOde', 1, '%12g');
       dudxOde=mm.mapFunctionDer(u2);
-      prtMat(dudxOde, 'dudxOde', 1, '%10g');
-      fluxOde = mm.mapFunction(f2);
-      prtMat(fluxOde, 'fluxOde', 1, '%10g');
+      prtMat(dudxOde, 'dudxOde', 1, '%12g');
+      fluxOde = self.calcFOdePts(xIntPts, fIntPts);
+      prtMat(fluxOde, 'fluxOde', 1, '%12g');
       dupdxOde=mm.mapFunctionDer(up2);
-      prtMat(dupdxOde, 'dupdxOde', 1, '%10g');
-      [dFdv,dFdvDot]=self.calcDOdeDv(0, u2, up2, f2, v, vDot);
-      prtMat(dFdv, 'dFdv', 1, '%10g');
-      prtMat(dFdvDot, 'dFdvDot', 1, '%10g');
-      [dFdu,dFduDot]=self.calcDOdeDu(0, u2, up2, f2, v, vDot);
-      prtMat(dFdu, 'dFdu', 1, '%10g');
-      prtMat(dFduDot, 'dFduDot', 1, '%10g');
+      prtMat(dupdxOde, 'dupdxOde', 1, '%12g');
+      [dFdv,dFdvDot]=self.calcDOdeDv(0, u2, up2, fluxOde, v, vDot);
+      prtMat(dFdv, 'dFdv', 1, '%12g');
+      prtMat(dFdvDot, 'dFdvDot', 1, '%12g');
+      [dFdu,dFduDot]=self.calcDOdeDu(0, u2, up2, fluxOde, v, vDot);
+      prtMat(dFdu, 'dFdu', 1, '%12g');
+      prtMat(dFduDot, 'dFduDot', 1, '%12g');
     end
     
   end
   
   methods(Access=private)
+    
+    function f=calcODEResidual(self, time, u2, up2, fluxOde, v, vDot)
+      mm = self.meshMapper;
+      uOde=mm.mapFunction(u2);
+      upOde=mm.mapFunction(up2);
+      dudxOde=mm.mapFunctionDer(u2);
+      dupdxOde=mm.mapFunctionDer(up2);
+      f = callVarargFunc(self.odeFunc, ...
+        {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+    end
+    
+    function fOde=calcFOdePts(self, xIntPts, fIntPts)
+      fOde=interp1(xIntPts, fIntPts', self.odeMesh)';
+    end
   end
   
   properties(Access=private)
