@@ -3,14 +3,13 @@ n=10;
 L=1;
 x = linspace(0,L,n);
 t0=1e-4;
-t=[t0 .1*2.^[1:5]];
 t=linspace(t0, .6, 10);
 m = 0;
 xOde = L;
 icF = @(x) icFunc(x,t0);
 odeIcF = @() odeIcFunc(t0);
-opts.vectorized='on';
-[u,uode] = pde1dM(m, @pdeFunc,icF,@bcFunc,x,t,@odeFunc, odeIcF,xOde,opts);
+opts.vectorized='on'; % speed up computation
+[u,uode] = pde1dm(m, @pdeFunc,icF,@bcFunc,x,t,@odeFunc, odeIcF,xOde,opts);
 va=vAnal(t);
 ua=uAnal(t,x);
 
@@ -28,6 +27,8 @@ fprintf('Maximum error in PDE valriable=%10.2e\n', max(abs(u(:)-ua(:))));
 end
 
 function [c,f,s] = pdeFunc(x,t,u,DuDx,v,vdot)
+% for vectorized mode, we return coefficients at
+% multiple x locations
 nx = length(x);
 c = repmat(v(1)^2,1,nx);
 f = DuDx;
@@ -36,7 +37,6 @@ end
 
 function u0 = icFunc(x, t0)
 u0 = uAnal(t0, x);
-%prtVec('u0', u0);
 end
 
 function [pl,ql,pr,qr] = bcFunc(xl,ul,xr,ur,t,v,vdot)
@@ -47,7 +47,6 @@ qr = 1;
 end
 
 function f=odeFunc(t,v,vdot,x,u,DuDx)
-%fprintf('x=%f\n', x);
 f=v*u + DuDx + 1 + t - vdot(1);
 end
 

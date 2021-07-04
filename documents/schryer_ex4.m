@@ -8,7 +8,7 @@ m = 0;
 xOde = [pi -pi]';
 % Set vectorized mode to improve performance
 opts.vectorized='on';
-[u,vOde] = pde1dM(m,@pdeFunc,@icFunc,@bcFunc,x,t,@odeFunc,@odeIcFunc,xOde,opts);
+[u,vOde] = pde1dm(m,@pdeFunc,@icFunc,@bcFunc,x,t,@odeFunc,@odeIcFunc,xOde,opts);
 
 % Compute analytical solution for comparison.
 ua=uAnal(t,x);
