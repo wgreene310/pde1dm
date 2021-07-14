@@ -80,11 +80,15 @@ end
 maxIter = 10;
 it = 0;
 y0_new = y0; yp0_new = yp0;
-if(icdiag)
+if icdiag
   fprintf('decic: AbsTol=%g, RelTol=%g\n', absTol, relTol);
   prtShortVec(y0, 'y0');
   prtShortVec(yp0, 'yp0');
   prtShortVec(odefun(t0,y0, yp0), 'res0');
+end
+if icdiag>1
+  prtShortVec(fixed_y0, 'fixed_y0');
+  prtShortVec(fixed_yp0, 'fixed_yp0');
 end
 while(it <= maxIter)
   res = odefun(t0,y0_new, yp0_new);
