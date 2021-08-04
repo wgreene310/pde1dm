@@ -80,11 +80,13 @@ end
 maxIter = 10;
 it = 0;
 y0_new = y0; yp0_new = yp0;
+res0=odefun(t0,y0, yp0);
+resTol=max(relTol*abs(res0), absTol);
 if icdiag
   fprintf('decic: AbsTol=%g, RelTol=%g\n', absTol, relTol);
   prtShortVec(y0, 'y0');
   prtShortVec(yp0, 'yp0');
-  prtShortVec(odefun(t0,y0, yp0), 'res0');
+  prtShortVec(res0, 'res0');
 end
 if icdiag>1
   prtShortVec(fixed_y0, 'fixed_y0');
@@ -93,14 +95,14 @@ end
 while(it <= maxIter)
   res = odefun(t0,y0_new, yp0_new);
   resnrm=norm(res);
-  maxRes = max(max(relTol*abs(res),absTol));
+  maxRes=norm(res,inf);
   if(icdiag > 1)
     fprintf('iteration=%d, maxres=%12.3e\n', it, maxRes);
   end
   if(icdiag > 2)
     prtShortVec(res, 'res');
   end
-  if(maxRes <= absTol)
+  if all(abs(res)<resTol)
     return;
   end
   res=res(:);
@@ -185,7 +187,7 @@ while(it <= maxIter)
   end
   it = it + 1;
 end
-
+fprintf('iteration=%d, maxres=%12.3e\n', it, maxRes);
 warning ('decic: Failed to obtain a converged set of consistent initial conditions.',...
   ' This might cause the ODE to DAE solver to fail in the first step.');
 
