@@ -46,11 +46,14 @@ classdef PDE1dImpl < handle
       error('Argument seven must be a PDEOPtions instance.');
     end
     obj.pdeOpts = opts;
+    if isempty(opts.numIntegrationPoints)
+      opts.numIntegrationPoints = opts.polyOrder+1;
+    end
     obj.intRule = GaussianIntegrationRule(GaussianIntegrationRule.Curve, ...
       opts.numIntegrationPoints);
     ic1 = icFunc(x(1));
     obj.numDepVars = length(ic1);
-    obj.numElemNodes = 2;
+    obj.numElemNodes = opts.polyOrder+1;
     obj.numFEMEqns = obj.numNodes*obj.numDepVars;
     obj.totalNumEqns = obj.numFEMEqns;
     obj.hasODE = opts.hasODE;
@@ -67,15 +70,33 @@ classdef PDE1dImpl < handle
     end
     obj.y0 = obj.y0FEM(:);
     
-    ne = obj.numNodes-1;
-    numXpts = ne*obj.numIntegrationPoints;
+    obj.numElems=(obj.numNodes-1)/(obj.numElemNodes-1);
+    numXpts = obj.numElems*obj.numIntegrationPoints;
     % calc xpts for the mesh
     gPts = obj.intRule.points;
-    N = obj.shapeLine2(gPts);
+    if obj.numElemNodes==2
+      obj.sF =  @obj.shapeLine2;
+      obj.dSf = @obj.dShapeLine2;
+      obj.N = obj.shapeLine2(gPts);
+      obj.dN = obj.dShapeLine2(gPts);
+    elseif obj.numElemNodes==3
+      obj.sF =  @obj.shapeLine3;
+      obj.dSf = @obj.dShapeLine3;
+      obj.N = obj.shapeLine3(gPts);
+      obj.dN = obj.dShapeLine3(gPts);
+    else
+      error('Unsupported number of element nodes.');
+    end
     x = obj.xmesh;
+    obj.xPts=zeros(1, numXpts);
+    obj.NN = zeros(obj.numElemNodes, obj.numElemNodes, obj.numIntegrationPoints);
     ip = 1:obj.numIntegrationPoints:numXpts;
     for i=1:obj.numIntegrationPoints
-      obj.xPts(ip) = x(1:end-1)*N(1,i) + x(2:end)*N(2,i);
+      obj.NN(:,:,i) = obj.N(:,i)*obj.N(:,i)';
+      for j=1:obj.numElemNodes
+        jj=obj.numElemNodes-j;
+        obj.xPts(ip) = obj.xPts(ip) + x(j:obj.numElemNodes-1:end-jj)*obj.N(j,i);
+      end
       ip = ip + 1;
     end
     
@@ -134,12 +155,12 @@ classdef PDE1dImpl < handle
         %fixed_y0 = [ones(n-1,1);0];
         %fixed_y0 = [0; ones(n-1,1)];
         fixed_y0 = zeros(n,1);
-        %fixed_y0 = [ones(self.numFEMEqns,1);zeros(self.numODE,1)];
+        %fixed_y0(self.numDepVars+1:self.numFEMEqns-self.numDepVars) = 1;
         yp0 = zeros(n,1);
         %icf(0,y0,yp0)'
         fixed_yp0 = zeros(n,1);
-        icopts.AbsTol=abstol;
-        icopts.RelTol=reltol;
+        icopts.AbsTol=abstol/10;
+        icopts.RelTol=reltol/10;
         icopts.icdiagnostics=icdiag;
         y0Save = self.y0;
         if 0
@@ -151,9 +172,8 @@ classdef PDE1dImpl < handle
           [maxChg, indMax] = max(abs(y0-y0Save));
           fprintf('max change, y0=%g at equation %d\n', maxChg, indMax);
           prtShortVec(y0, 'y0');
-          prtShortVec(yp0, 'yp0', 1, '%16.10g');
+          prtShortVec(yp0, 'yp0', 1, '%16.8g');
         end
-        opts=odeset(opts,'initialslope', yp0);
         if(icdiag)
           prtShortVec(icf(t0,y0,yp0), 'res');
         end
@@ -180,9 +200,9 @@ classdef PDE1dImpl < handle
       end
       
       if(useOde15i)
-        %sol=ode15i(icf, self.tspan, y0, yp0, opts);
         [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
       else
+        opts=odeset(opts,'initialslope', yp0);
         opts=odeset(opts, 'Mass', massFunc);
         [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
       end
@@ -304,6 +324,10 @@ classdef PDE1dImpl < handle
       self.printSystemVector(S, 'S', 1, '%16.8e');
       self.printSystemVector(F, 'F', 1, '%16.8e');
       self.printSystemVector(Cxd, 'Cxd', 1, '%16.8e');
+      self.printSystemVector(S-F, 'S-F', 1, '%16.8e');
+      self.printSystemVector(S-F+Cxd, 'S-F+Cxd', 1, '%16.8e');
+      self.printSystemVector(S-F-Cxd, 'S-F-Cxd', 1, '%16.8e');
+      self.printSystemVector(Cxd+S-F, 'Cxd+S-F', 1, '%16.8e');
       if(self.eqnDiagnostics>1)
         K = self.calcJacobian(0, u, up);
         prtMat(K, 'K', 1, '%13g');
@@ -342,7 +366,8 @@ classdef PDE1dImpl < handle
       [F, S,Cxd,fIntPts] = self.calcFEMEqns(t0, self.y0, yp0, v0, v0Dot, self.y0);
       u2 = self.femU2FromSysVec(self.y0);
       up2 = self.femU2FromSysVec(yp0);
-      self.odeImpl = ODEImpl(self.xmesh, odeFunc, odeICFunc, ...
+      meshMapper = PDEMeshMapper(self.xmesh, odeMesh, self.numElemNodes, self.sF, self.dSf);
+      self.odeImpl = ODEImpl(meshMapper, odeFunc, odeICFunc, ...
         odeMesh, t0, u2, up2, self.xPts, fIntPts, self.pdeOpts.testFunctionDOFMap);
       numODEEqn = self.odeImpl.numODEEquations;
       self.totalNumEqns = self.numFEMEqns + numODEEqn;
@@ -423,8 +448,6 @@ classdef PDE1dImpl < handle
       end
       [F, S,Cxd, fIntPts] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
       R = F-S;
-      %R = Cxd-R;
-      %R=-R;
       if self.hasODE
         us=SysVec(u, self.numNodes, self.numDepVars);
         ups=SysVec(up, self.numNodes, self.numDepVars);
@@ -502,27 +525,33 @@ classdef PDE1dImpl < handle
       gPts = self.intRule.points;
       gWts = self.intRule.wts;
       numIntPts = length(gPts);
-      N = self.shapeLine2(gPts);
-      dN = self.dShapeLine2(gPts);
-      x = self.xmesh(:)';  
+      nen=self.numElemNodes;
+      N=self.N; %#ok<PROPLC>
+      dN=self.dN; %#ok<PROPLC>
+      NN=self.NN; %#ok<PROPLC>
+      x = self.xmesh(:)';
       u2 = self.femU2FromSysVec(u);
       up2 = self.femU2FromSysVec(up);
 			numXpts = size(self.xPts,2);
-      jac = diff(x)/2;
-      nen=self.numElemNodes;
-      NN = zeros(nen, nen, numIntPts);
-      u21 = u2(:,1:end-1);
-      u22 = u2(:,2:end);
+      nenM1=nen-1;
+      i1=1:nenM1:nn-nen+1;
+      i2=nen:nenM1:nn;
+      jac=(x(i2)-x(i1))/2;
       uPts = zerosLike(ndv, numXpts,  depVarClassType);
       duPts = zerosLike(ndv, numXpts, depVarClassType);
-      ip = 1:numIntPts:numXpts;
+      ip = 1:numIntPts:numXpts-numIntPts+1;
       for i=1:numIntPts
-        NN(:,:,i) = N(:,i)*N(:,i)';
-        % assume two node elements
-        uPts(:,ip) = u21*N(1,i) + u22*N(2,i);
-        duPts(:,ip) = u21*dN(1,i)./jac + u22*dN(2,i)./jac;
+        jj=nenM1;
+        for j=1:nen
+          u2j=u2(:,j:nenM1:end-jj);
+          uPts(:,ip) = uPts(:,ip) + u2j*N(j,i); %#ok<PROPLC>
+          duPts(:,ip) = duPts(:,ip) + u2j*dN(j,i); %#ok<PROPLC>
+          jj=jj-1;
+        end
+        duPts(:,ip) = duPts(:,ip)./jac;
         ip = ip + 1;
       end
+ 
       if(self.vectorized)
         % call pde func for all points
         [c,f,s] = callVarargFunc(self.pdeFunc, ...
@@ -579,37 +608,35 @@ classdef PDE1dImpl < handle
         s = s.*xm;
       end
       useDiagMM = self.useDiagMassMat;
-      e1 = 1:nn-1;
-      e2 = 2:nn;
       ip = 1:numIntPts:numXpts;
       for i=1:numIntPts
         dNdx = dN(:,i)./jac;
         fipJac = f(:, ip).*jac*gWts(i);
-        F(:,e1) = F(:,e1) + dNdx(1,:).*fipJac;
-        F(:,e2) = F(:,e2) + dNdx(2,:).*fipJac;
         sipJac = s(:, ip).*jac*gWts(i);
-        S(:,e1) = S(:,e1) + N(1,i)*sipJac;
-        S(:,e2) = S(:,e2) + N(2,i)*sipJac;
         if isFullCMat
           cipJacFull = c(:,:,ip).*(reshape(jac,1,1,[])*gWts(i));
         else
           cipJac = c(:, ip).*jac*gWts(i);
         end
-        if(useDiagMM)
-          Cv(:,e1) = Cv(:,e1) + up2(:,e1).*cipJac/self.numElemNodes;
-          Cv(:,e2) = Cv(:,e2) + up2(:,e2).*cipJac/self.numElemNodes;
-        else
-          if ~isFullCMat
-            Cv(:,e1) = Cv(:,e1) + (NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2)).*cipJac;
-            Cv(:,e2) = Cv(:,e2) + (NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2)).*cipJac;
+        for j=1:nen
+          ej=j:nenM1:nn-nen+j;
+          F(:,ej) = F(:,ej) + dNdx(j,:).*fipJac;
+          S(:,ej) = S(:,ej) + N(j,i)*sipJac;
+          if(useDiagMM)
+            Cv(:,ej) = Cv(:,ej) + up2(:,ej).*cipJac/nen;
           else
-            upie1 = reshape(NN(1,1,i)*up2(:,e1) + NN(1,2,i)*up2(:,e2),ndv,1,[]);
-            upie2 = reshape(NN(1,2,i)*up2(:,e1) + NN(2,2,i)*up2(:,e2),ndv,1,[]);
-            Cv(:,e1) = Cv(:,e1) + reshape(multiprod(cipJacFull, upie1),ndv,[]);
-            Cv(:,e2) = Cv(:,e2) + reshape(multiprod(cipJacFull, upie2),ndv,[]);
+            for k=1:nen
+              ek=k:nenM1:nn-nen+k;
+              if ~isFullCMat
+                Cv(:,ej) = Cv(:,ej) + NN(j,k,i)*up2(:,ek).*cipJac;
+              else
+                upiek = reshape(NN(j,k,i)*up2(:,ek) ,ndv,1,[]);
+                Cv(:,ej) = Cv(:,ej) + reshape(multiprod(cipJacFull, upiek),ndv,[]);
+              end
+            end
           end
         end
-      ip = ip + 1;
+        ip = ip + 1;
       end
       F=F(:);
       S=S(:);
@@ -710,6 +737,9 @@ classdef PDE1dImpl < handle
       nn = self.numNodes;
       % jacobian is block-tridiagonal with the block size equal numDepVars
       J = kron( spdiags(ones(nn,3),[-1 0 1],nn,nn), ones(ndv,ndv));
+      po = self.pdeOpts.polyOrder;
+      inds=-po:po;
+      J = kron( spdiags(ones(nn,length(inds)),inds,nn,nn), ones(ndv,ndv));
       
       % odes may couple with any other vars
       if self.hasODE
@@ -763,12 +793,21 @@ classdef PDE1dImpl < handle
       ds = [-.5 .5]'*ones(1,length(r));
     end
     
+    function shp = shapeLine3( r )
+      shp = [-r.*(1-r)/2 1-r.^2 r.*(1+r)/2]';
+    end
+    
+    function ds = dShapeLine3( r )
+      r=r(:)';
+      ds = [-.5+r; -2*r; .5+r];
+    end
+    
   end % methods
   
   properties(Access=private)
     isOctave;
     intRule;
-    numNodes, numElemNodes;
+    numNodes, numElems, numElemNodes;
     numFEMEqns, totalNumEqns;
     numIntegrationPoints;
     hasODE, odeImpl;
@@ -779,6 +818,8 @@ classdef PDE1dImpl < handle
     icDiagnostics, eqnDiagnostics, analyticalJacobian;
     pdeOpts;
     jacobianPattern, jacobianGroupList;
+    sF, dSf; % shape function and derivative functions
+    N, NN, dN; % shape functions and derivatives at int pts
     % temporary arrays for vectorized mode
     xPts;
   end

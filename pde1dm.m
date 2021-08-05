@@ -48,11 +48,12 @@ p.addParameter('MaxStep', []);
 p.addParameter('Vectorized', 'off',validOnOff);
 p.addParameter('EqnDiagnostics', 0);
 p.addParameter('ICDiagnostics', 0);
-p.addParameter('PolyOrder', 1);
+validPolyOrder=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1, '<=', 9});
+p.addParameter('PolyOrder', 1, validPolyOrder);
 p.addParameter('ViewMesh', 1);
 p.addParameter('DiagonalMassMatrix', 'off', validOnOff);
-validPts = @(n) isscalar(n) && n>0;
-p.addParameter('NumIntegrationPoints', 2, validPts);
+validPts=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1});
+p.addParameter('NumIntegrationPoints', [], validPts);
 p.addParameter('AnalyticalJacobian', 'off', validOnOff);
 p.addParameter('InitialSlope', [], validHandle);
 validInitFunc = @(x) isempty(x) || validHandle(x);
@@ -74,6 +75,25 @@ pdeOpts.analyticalJacobian = strcmpi(p.Results.AnalyticalJacobian, 'on');
 pdeOpts.initialSlope = p.Results.InitialSlope;
 pdeOpts.eqnDiagnosticsInitFunc = p.Results.eqnDiagnosticsInitFunc;
 pdeOpts.testFunctionDOFMap = p.Results.testFunctionDOFMap;
+pdeOpts.polyOrder = p.Results.PolyOrder;
+
+polyOrd=pdeOpts.polyOrder;
+if polyOrd>1
+  % add intermediate nodes for higher-order elems
+  numNodesOrig = length(xmesh);
+  numElems=numNodesOrig-1;
+  elemLen=xmesh(2:end)-xmesh(1:end-1);
+  del=elemLen/polyOrd;
+  numNodesNew=numElems*polyOrd+1;
+  xn=zeros(1,numNodesNew);
+  ii=1:polyOrd:numNodesNew-polyOrd;
+  xn([ii end])=xmesh;
+  for i=2:polyOrd
+    ii=ii+1;
+    xn(ii)=xmesh(1:end-1)+(i-1)*del;
+  end
+  xmesh=xn;
+end
 
 if  hasODE
   pdeImpl = PDE1dImpl(m, pde, ic, bc, xmesh, t, pdeOpts, ...
@@ -103,6 +123,12 @@ if(~eqnDiagnostics)
   else
     sol = toSol3(u, npde, length(xmesh));
   end
+  if pdeOpts.polyOrder>1
+    % solution on the original mesh
+    nt=size(u, 1);
+    %sol
+    sol=sol(:,1:pdeOpts.polyOrder:end,:);
+  end
 else
   pdeImpl.testFuncs;
   sol=[];
@@ -114,7 +140,7 @@ function sol=toSol3(u, npde, nx)
 nt=size(u, 1);
 sol = zeros(nt, nx, npde);
 for i = 1:npde
-  sol(:,:,i) = u(:,i:npde:end);
+  sol(:,:,i) = u(:,i:npde:end-npde+i);
 end
 end
 

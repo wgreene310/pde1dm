@@ -26,7 +26,7 @@ classdef ODEImpl
   
   methods
     
-    function obj = ODEImpl(xmesh, odeFunc, odeICFunc, odeMesh, ...
+    function obj = ODEImpl(meshMapper, odeFunc, odeICFunc, odeMesh, ...
         t0, u2, up2, xIntPts, fIntPts, testFunctionDOFMap)
       if nargin < 9
         testFunctionDOFMap = [];
@@ -36,7 +36,7 @@ classdef ODEImpl
       obj.odeFunc = odeFunc;
       obj.odeICFunc = odeICFunc;
       obj.odeMesh = odeMesh;
-      obj.meshMapper = PDEMeshMapper(xmesh, odeMesh);
+      obj.meshMapper = meshMapper;
       obj.y0Ode = odeICFunc();
       obj.numODEVariables = length(obj.y0Ode);
       v0Dot=zeros(obj.numODEVariables,1);

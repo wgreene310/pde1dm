@@ -26,6 +26,7 @@ classdef PDEOptions
     initialSlope, eqnDiagnosticsInitFunc, isOctave;
     useInternalNumJac;
     testFunctionDOFMap;
+    polyOrder;
   end
   
   methods
@@ -35,7 +36,7 @@ classdef PDEOptions
       obj.eqnDiagnosticsInitFunc=[];
       obj.useDiagMassMat = false;
       obj.vectorized = false;
-      obj.numIntegrationPoints = 2;
+      obj.numIntegrationPoints = [];
       obj.hasODE = false;
       obj.analyticalJacobian = false;
       obj.initialSlope = [];
@@ -46,6 +47,7 @@ classdef PDEOptions
         obj.useInternalNumJac=false;
       end
       obj.testFunctionDOFMap = [];
+      obj.polyOrder=1;
     end
   end
 end
