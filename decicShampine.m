@@ -37,7 +37,12 @@ p.addParameter('RelTol', 1e-3, @(x) isscalar (x));
 p.addParameter('AbsTol', 1e-6, @(x) isscalar (x));
 p.addParameter('ICDiagnostics', 0);
 p.addParameter('Jacobian', [], @(x) validHandle(x) || (iscell(x) && length(x)==2));
+if nargin==7
 p.parse(odefun, t0, y0, fixed_y0, yp0,fixed_yp0, options);
+else
+  p.parse(odefun, t0, y0, fixed_y0, yp0,fixed_yp0);
+  options=struct;
+end
 relTol=p.Results.RelTol;
 absTol=p.Results.AbsTol;
 icdiag = p.Results.ICDiagnostics;
