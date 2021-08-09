@@ -125,8 +125,6 @@ while(it <= maxIter)
     [dfDy, dfDyp] = options.Jacobian(t0, y0_new, yp0_new);
     checkJacSize(dfDy, dfDyp, n);
   end
-  %dfDy
-  %dfDyp
   
   % remove columns for the components of yp0 that are fixed
   dfDyp = dfDyp(:, free_yp0);
@@ -165,7 +163,14 @@ while(it <= maxIter)
         w=S2122\d(algdofs);
       else
         [Qs,Rs,Es] = qr(S2122);
-        % FIXME: need to check rank here
+        numAlg = size(Rs,1);
+        rankRs=rankR(Rs);
+        if rankRs < numAlg
+          fprintf(2, ['Failure of consistent initialization algorithm: \n' ...
+            'There are %d algebraic equations but the rank is only %d.\n'], ...
+            numAlg, rankRs);
+          return;
+        end
         w = Es*(Rs\(Qs'*d(algdofs)));
         if(icdiag > 3)
           prtMat(Qs, 'Qs');
@@ -193,8 +198,8 @@ while(it <= maxIter)
   it = it + 1;
 end
 fprintf('iteration=%d, maxres=%12.3e\n', it, maxRes);
-warning ('decic: Failed to obtain a converged set of consistent initial conditions.',...
-  ' This might cause the ODE to DAE solver to fail in the first step.');
+warning (['decic: Failed to obtain a converged set of consistent initial conditions.'...
+  ' This might cause the ODE to DAE solver to fail in the first step.']);
 
 end
 
@@ -257,3 +262,4 @@ if(length(x) ~= n)
     inputname(2), n);
 end
 end
+
