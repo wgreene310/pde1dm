@@ -84,6 +84,11 @@ classdef PDE1dImpl < handle
       obj.dSf = @obj.dShapeLine3;
       obj.N = obj.shapeLine3(gPts);
       obj.dN = obj.dShapeLine3(gPts);
+     elseif obj.numElemNodes==4
+      obj.sF =  @obj.shapeLine4;
+      obj.dSf = @obj.dShapeLine4;
+      obj.N = obj.shapeLine4(gPts);
+      obj.dN = obj.dShapeLine4(gPts);
     else
       error('Unsupported number of element nodes.');
     end
@@ -127,10 +132,10 @@ classdef PDE1dImpl < handle
         y0Ode = [];
         yp0Ode = [];
       end
-      [pl,ql,pr,qr] = callVarargFunc(self.bcFunc,...
+      [pl,qLeft,pr,qRight] = callVarargFunc(self.bcFunc,...
         {xl, ul,xr,ur,t0,y0Ode,yp0Ode});
-      self.dirConsFlagsLeft = ql~=0;
-      self.dirConsFlagsRight = qr~=0;
+      self.dirConsFlagsLeft = qLeft~=0;
+      self.dirConsFlagsRight = qRight~=0;
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
       
@@ -151,12 +156,33 @@ classdef PDE1dImpl < handle
         icf = @(t,y,yp) self.calcResidual(t,y,yp,depVarClassType);
         t0 = self.tspan(1);
         n=length(self.y0);
+        yp0 = zeros(n,1);
         %fixed_y0 = ones(n,1);
         %fixed_y0 = [ones(n-1,1);0];
         %fixed_y0 = [0; ones(n-1,1)];
-        fixed_y0 = zeros(n,1);
-        %fixed_y0(self.numDepVars+1:self.numFEMEqns-self.numDepVars) = 1;
-        yp0 = zeros(n,1);
+        fixed_y0 = zeros(n,1); % all y0 free
+        if 0
+          % this strategy is too restrictive
+          % fix all non-BC fem dofs
+          fixed_y0(self.numDepVars+1:self.numFEMEqns-self.numDepVars) = 1;
+          % free any dofs that are obviously algebraic
+          [dfdy,dfdyp]=self.calcSparseJacobian(t0, self.y0, yp0);
+          if 0
+          for i=1:n
+            if all(dfdyp(i,:)==0) && all(dfdyp(:,i)==0)
+              fixed_y0(i)=0;
+            end
+          end
+          else
+            [Q,R,E] = qr(full(dfdyp));
+            adr=abs(diag(R));
+            tol=eps*max(adr);
+            rr=nnz(adr>tol);
+            ii=rr+1:n;
+            free_y0=logical(sum(E(:,ii)'));
+            fixed_y0(free_y0)=0;
+          end
+        end
         %icf(0,y0,yp0)'
         fixed_yp0 = zeros(n,1);
         icopts.AbsTol=abstol/10;
@@ -800,6 +826,33 @@ classdef PDE1dImpl < handle
     function ds = dShapeLine3( r )
       r=r(:)';
       ds = [-.5+r; -2*r; .5+r];
+    end
+    
+    function shp = shapeLine4( r )
+      r=r(:)';
+      rp1=r+1;
+      rm1=r-1;
+      rp13=r+1/3;
+      rm13=r-1/3;
+      shp = [-9/16*(rp13).*(rm13).*(rm1)
+        27/16*(rp1).*(rm13).*(rm1)
+        -27/16*(rp1).*(rp13).*(rm1)
+        9/16*(rp1).*(rp13).*(rm13)
+        ];
+    end
+    
+    function ds = dShapeLine4( r )
+      r=r(:)';
+      rp1=r+1;
+      rm1=r-1;
+      rp13=r+1/3;
+      rm13=r-1/3;
+      ds = [
+        -9/16*(rm13.*rp13 + rm1.*rp13 + rm1.*rm13)
+        27/16*(rp1.*rm13 + rm1.*rp1 + rm1.*rm13)
+        -27/16*(rp1.*rp13 + rm1.*rp1 + rm1.*rp13)
+        9/16*(rp1.*rp13 + rp1.*rm13 + rm13.*rp13)
+        ];
     end
     
   end % methods
