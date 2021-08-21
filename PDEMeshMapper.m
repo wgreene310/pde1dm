@@ -33,8 +33,8 @@ classdef PDEMeshMapper
       numDest = length(destMesh);
       obj.destMeshFirstLastNodeIndex = zeros(numDest,2);
       obj.destMeshParamVals = zeros(numDest,1);
-      obj.sF=sF;
-      obj.dSf=dSf;
+      obj.N = zeros(numElemNodes, numDest);
+      obj.dNdx = zeros(numElemNodes, numDest);
       numDestMeshNodes = 0;
       for i=1:numDest
         xd=destMesh(i);
@@ -51,8 +51,13 @@ classdef PDEMeshMapper
         end
         obj.destMeshFirstLastNodeIndex(i,:) = [indLeft indRight];
         obj.destNodeIndex = [obj.destNodeIndex indLeft:indRight];
+        
         numDestMeshNodes = numDestMeshNodes+numElemNodes;
         s=obj.calcXi(srcMesh(indLeft), srcMesh(indRight), xd);
+        obj.N(:,i)=sF(s);
+        ei=obj.destMeshFirstLastNodeIndex(i,:);
+        jac = 2. / (srcMesh(ei(2))-srcMesh(ei(1)));
+        obj.dNdx(:,i) = jac*dSf(s);
         obj.destMeshParamVals(i) = s;
       end
       obj.destNodeIndex = unique(obj.destNodeIndex);
@@ -71,20 +76,15 @@ classdef PDEMeshMapper
       numDest = length(self.destMesh);
       destU = zerosLike(numDepVars, numDest, srcU);
       for i=1:numDest
-        s = self.destMeshParamVals(i);
         ei=self.destMeshFirstLastNodeIndex(i,:);
         if(calcDeriv)
-          dN = self.dSf(s);
-          jac = 2. / (self.srcMesh(ei(2))-self.srcMesh(ei(1)));
-          destU(:,i) = jac*srcU(:,ei(1):ei(2))*dN;
+          destU(:,i) = srcU(:,ei(1):ei(2))*self.dNdx(:,i);
         else
-          N=self.sF(s);
-          destU(:,i) = srcU(:,ei(1):ei(2))*N;
-        end
-      
+          destU(:,i) = srcU(:,ei(1):ei(2))*self.N(:,i);
+        end       
       end
     end
-  
+    
   end % methods
   
   methods(Static)
@@ -96,7 +96,7 @@ classdef PDEMeshMapper
   properties(Access=private)
     srcMesh, destMesh;
     destMeshFirstLastNodeIndex, destMeshParamVals;
-    sF, dSf;
+    N, dNdx;
   end
   
 end
