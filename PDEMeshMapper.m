@@ -15,7 +15,7 @@
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
 %   Copyright (C) 2016-2021 William H. Greene
-classdef PDEMeshMapper
+classdef PDEMeshMapper < handle
   
   %% Map a solution and derivatives from FEM nodes to arbitrary points
   %% in the region.
@@ -35,19 +35,22 @@ classdef PDEMeshMapper
       obj.destMeshParamVals = zeros(numDest,1);
       obj.N = zeros(numElemNodes, numDest);
       obj.dNdx = zeros(numElemNodes, numDest);
+      firstNode = @(elemIndex) (numElemNodes-1)*(elemIndex-1) + 1;
+      getElemIndex=@(nodeId) nodeId/(numElemNodes-1);
       numDestMeshNodes = 0;
       for i=1:numDest
         xd=destMesh(i);
         id=find(srcMesh<=xd, 1, 'last');
-        if(id==1)
+        if isempty(id)
           indLeft=1;
           indRight = numElemNodes;
         elseif(id==numSrc)
           indLeft=id-numElemNodes+1;
           indRight = numSrc;
         else
-          indLeft = id;
-          indRight=id+numElemNodes-1;
+          ei=ceil(getElemIndex(id));
+          indLeft = firstNode(ei);
+          indRight=indLeft+numElemNodes-1;
         end
         obj.destMeshFirstLastNodeIndex(i,:) = [indLeft indRight];
         obj.destNodeIndex = [obj.destNodeIndex indLeft:indRight];
@@ -60,6 +63,7 @@ classdef PDEMeshMapper
         obj.dNdx(:,i) = jac*dSf(s);
         obj.destMeshParamVals(i) = s;
       end
+      obj.allocTmp = true;
       obj.destNodeIndex = unique(obj.destNodeIndex);
     end
   
@@ -71,18 +75,22 @@ classdef PDEMeshMapper
       destU=self.mapFunctionImpl(srcU, true);
     end
     
-    function destU=mapFunctionImpl(self,srcU, calcDeriv)
+    function uOut=mapFunctionImpl(self,srcU, calcDeriv)
       numDepVars = size(srcU,1);
       numDest = length(self.destMesh);
-      destU = zerosLike(numDepVars, numDest, srcU);
+      if self.allocTmp
+        self.destU = zerosLike(numDepVars, numDest, srcU);
+        self.allocTmp=false;
+      end
       for i=1:numDest
         ei=self.destMeshFirstLastNodeIndex(i,:);
         if(calcDeriv)
-          destU(:,i) = srcU(:,ei(1):ei(2))*self.dNdx(:,i);
+          self.destU(:,i) = srcU(:,ei(1):ei(2))*self.dNdx(:,i);
         else
-          destU(:,i) = srcU(:,ei(1):ei(2))*self.N(:,i);
-        end       
+          self.destU(:,i) = srcU(:,ei(1):ei(2))*self.N(:,i);
+        end
       end
+      uOut=self.destU;
     end
     
   end % methods
@@ -97,6 +105,7 @@ classdef PDEMeshMapper
     srcMesh, destMesh;
     destMeshFirstLastNodeIndex, destMeshParamVals;
     N, dNdx;
+    allocTmp, destU; % temporary for use in mapFunctionImpl
   end
   
 end
