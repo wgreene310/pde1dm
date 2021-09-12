@@ -39,8 +39,10 @@ classdef PDE1dImpl < handle
     obj.pdeFunc = pdeFunc;
 		obj.icFunc = icFunc;
 		obj.bcFunc = bcFunc;
+    x=x(:)';
 		obj.xmesh = x;
     obj.numNodes = length(x);
+    t=t(:)';
 		obj.tspan = t;
     if ~isa(opts, 'PDEOptions')
       error('Argument seven must be a PDEOPtions instance.');
@@ -189,14 +191,23 @@ classdef PDE1dImpl < handle
         icopts.RelTol=reltol/10;
         icopts.icdiagnostics=icdiag;
         y0Save = self.y0;
-        if 0
+        if self.pdeOpts.cicMethod==1
           [y0,yp0]=decic(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0);
         else
           [y0,yp0]=decicShampine(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0,icopts);
         end
         if(icdiag)
+          prtShortVec(self.xmesh, 'x');
+          chgTol=max(icopts.RelTol*abs(self.y0), icopts.AbsTol);
+          if 0
           [maxChg, indMax] = max(abs(y0-y0Save));
           fprintf('max change, y0=%g at equation %d\n', maxChg, indMax);
+          end
+          chgY = y0-y0Save;
+          chgI = abs(chgY) > chgTol;
+          prtShortVec(chgY(chgI), 'change in y0 values');
+          I=1:n;
+          prtShortVec(I(chgI), 'changed y0 equations');
           prtShortVec(y0, 'y0');
           prtShortVec(yp0, 'yp0', 1, '%16.8g');
         end
@@ -379,6 +390,42 @@ classdef PDE1dImpl < handle
       end
     end
     
+    function R = calcResidual(self, time, u, up, depVarClassType)
+      if nargin<4
+        depVarClassType=u;
+      end
+      [rhs,Cxd] = calcRHS(self, time, u, up, depVarClassType);
+      R = Cxd+rhs;
+    end
+    
+    function [R,Cxd] = calcRHS(self, time, u, up, depVarClassType)
+      if nargin<4
+        depVarClassType=u;
+      end
+      if self.hasODE
+        v = self.odeImpl.getVFromSysVec(u);
+        vDot = self.odeImpl.getVFromSysVec(up);
+        uFEM = self.femUFromSysVec(u);
+        upFEM = self.femUFromSysVec(up);
+      else
+        v = [];
+        vDot = [];
+        uFEM = u;
+        upFEM = up;
+      end
+      [F, S,Cxd, fIntPts] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
+      R = F-S;
+      if self.hasODE
+        us=SysVec(u, self.numNodes, self.numDepVars);
+        ups=SysVec(up, self.numNodes, self.numDepVars);
+        [R,Cxd]=self.odeImpl.updateResiduals(time, us, ups, ...
+          self.xPts, fIntPts, R, Cxd);
+      end
+      % add constraints
+      [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
+      R=-R;
+    end 
+    
   end % methods
 	
   methods(Access=private)
@@ -454,36 +501,6 @@ classdef PDE1dImpl < handle
         up(i) = upsave;
       end
     end
-    
-    function R = calcResidual(self, time, u, up, depVarClassType)
-      [rhs,Cxd] = calcRHS(self, time, u, up, depVarClassType);
-      R = Cxd+rhs;
-    end
-    
-    function [R,Cxd] = calcRHS(self, time, u, up, depVarClassType)
-      if self.hasODE
-        v = self.odeImpl.getVFromSysVec(u);
-        vDot = self.odeImpl.getVFromSysVec(up);
-        uFEM = self.femUFromSysVec(u);
-        upFEM = self.femUFromSysVec(up);
-      else
-        v = [];
-        vDot = [];
-        uFEM = u;
-        upFEM = up;
-      end
-      [F, S,Cxd, fIntPts] = calcFEMEqns(self, time, uFEM, upFEM, v, vDot, depVarClassType);
-      R = F-S;
-      if self.hasODE
-        us=SysVec(u, self.numNodes, self.numDepVars);
-        ups=SysVec(up, self.numNodes, self.numDepVars);
-        [R,Cxd]=self.odeImpl.updateResiduals(time, us, ups, ...
-          self.xPts, fIntPts, R, Cxd);
-      end
-      % add constraints
-      [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
-      R=-R;
-    end 
     
     function [dfdy, dfdyp]=calcAnalJacobianODE(self, time, u, up)
       autoDiffF = @(u) self.calcResidual(time, u, up, u);
@@ -809,7 +826,7 @@ classdef PDE1dImpl < handle
     
 	end % methods
   
-  methods(Access=private, Static)
+  methods(Access=public, Static)
     
     function shp = shapeLine2( r )
       shp = [(1-r)/2 (1+r)/2]';

@@ -27,6 +27,7 @@ classdef PDEOptions
     useInternalNumJac;
     testFunctionDOFMap;
     polyOrder;
+    odeSolver, cicMethod;
   end
   
   methods
@@ -48,6 +49,8 @@ classdef PDEOptions
       end
       obj.testFunctionDOFMap = [];
       obj.polyOrder=1;
+      obj.cicMethod = 0;
+      obj.odeSolver = 0;
     end
   end
 end
