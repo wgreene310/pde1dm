@@ -37,6 +37,7 @@ p.addParameter('RelTol', 1e-3, @(x) isscalar (x));
 p.addParameter('AbsTol', 1e-6, @(x) isscalar (x));
 p.addParameter('ICDiagnostics', 0);
 p.addParameter('Jacobian', [], @(x) validHandle(x) || (iscell(x) && length(x)==2));
+p.addParameter('MaxIter', 10);
 if nargin==7
 p.parse(odefun, t0, y0, fixed_y0, yp0,fixed_yp0, options);
 else
@@ -45,6 +46,7 @@ else
 end
 relTol=p.Results.RelTol;
 absTol=p.Results.AbsTol;
+maxIter=p.Results.MaxIter;
 icdiag = p.Results.ICDiagnostics;
 haveJac = 0;
 
@@ -53,6 +55,7 @@ if(~isempty(jac))
   if(iscell(jac))
     dfDy = jac{1};
     dfDyp = jac{2};
+    n=length(y0);
     checkJacSize(dfDy, dfDyp, n);
     haveJac = 1;
   else
@@ -82,7 +85,6 @@ end
 
 %fprintf('anyFreeY0=%d, anyFreeYp0=%d\n', anyFreeY0, anyFreeYp0);
 
-maxIter = 10;
 it = 0;
 y0_new = y0; yp0_new = yp0;
 res0=odefun(t0,y0, yp0);
@@ -97,12 +99,14 @@ if icdiag>1
   prtShortVec(fixed_y0, 'fixed_y0');
   prtShortVec(fixed_yp0, 'fixed_yp0');
 end
+maxDeltaY=0; maxDeltaYp=0;
 while(it <= maxIter)
   res = odefun(t0,y0_new, yp0_new);
   resnrm=norm(res);
   maxRes=norm(res,inf);
   if(icdiag > 1)
-    fprintf('iteration=%d, maxres=%12.3e\n', it, maxRes);
+    fprintf('iteration=%d, maxres=%12.3e, maxDeltaY=%12.3e, maxDeltaYp=%12.3e\n', ...
+      it, maxRes, maxDeltaY, maxDeltaYp);
   end
   if(icdiag > 2)
     prtShortVec(res, 'res');
@@ -112,14 +116,17 @@ while(it <= maxIter)
   end
   res=res(:);
   
-  dfDy = []; dfDyp = [];
   if(haveJac == 0)
     % calculate by forward difference
     if(anyFreeY0)
-      dfDy=getDfDy(odefun, t0, y0_new, yp0_new, res, options);
+      dfDy=getDfDy(odefun, t0, y0_new, yp0_new, res);
+    else
+      dfDy = [];
     end
     if(anyFreeYp0)
-      dfDyp=getDfDyp(odefun, t0, y0_new, yp0_new, res, options);
+      dfDyp=getDfDyp(odefun, t0, y0_new, yp0_new, res);
+    else
+      dfDyp = [];
     end
   elseif(haveJac == 2)
     [dfDy, dfDyp] = options.Jacobian(t0, y0_new, yp0_new);
@@ -181,11 +188,13 @@ while(it <= maxIter)
       if(icdiag > 2)
         prtShortVec(w, 'w');
       end
+      maxDeltaY = norm(w,1);
       y0_new(free_y0) = y0_new(free_y0) + w;
       w1p = R11\(d(difdofs) - S(difdofs,:)*w);
     else
       w1p = R11\d(difdofs);
     end
+    maxDeltaYp = norm(w1p,1);
     wp = zeros(nu,1);
     wp(difdofs) = w1p;
     yp0_new(free_yp0) = yp0_new(free_yp0) + E*wp;
@@ -203,7 +212,7 @@ warning (['decic: Failed to obtain a converged set of consistent initial conditi
 
 end
 
-function dfDy=getDfDy(odefun, t, y, yp, r, options)
+function dfDy=getDfDy(odefun, t, y, yp, r)
 n = length(y);
 dfDy = zeros(n,n);
 sqrtEps = sqrt(eps);
@@ -217,7 +226,7 @@ for i=1:n
 end
 end
 
-function dfDyp=getDfDyp(odefun, t, y, yp, r, options)
+function dfDyp=getDfDyp(odefun, t, y, yp, r)
 n = length(y);
 dfDyp = zeros(n,n);
 sqrtEps = sqrt(eps);
@@ -235,7 +244,7 @@ function checkJacSize(dfDy, dfDyp, n)
 [md,nd]=size(dfDy); [mp,np]=size(dfDyp);
 if(md~=n || nd~=n || mp~=n || np~=n)
   msg=sprintf('decic: Jacobian matrices must be %d x %d', n, n);
-  error ('decic:jac_err', msg);
+  error ('decic:jac_err', msg); %#ok<SPERR>
 end
 end
 
