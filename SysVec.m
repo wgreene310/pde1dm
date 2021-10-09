@@ -23,7 +23,7 @@ classdef SysVec
   
   methods
     function obj = SysVec(v, numFEMNodes, numDepVars)
-      obj.dataVector = v;
+      obj.dataVector = v(:);
       obj.numFEMNodes=numFEMNodes;
       if nargin > 2
         obj.numDepVars=numDepVars;
