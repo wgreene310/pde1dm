@@ -51,6 +51,8 @@ p.addParameter('Vectorized', 'off',validOnOff);
 p.addParameter('EqnDiagnostics', 0);
 p.addParameter('OdeSolver', 0);
 p.addParameter('cicMethod', 0);
+p.addParameter('cicAbsTol', []);
+p.addParameter('cicRelTol', []);
 p.addParameter('ICDiagnostics', 0);
 if isOctave
   validPolyOrder=@(n) isscalar(n) && ~mod(n,1) && n>=1 && n<=3;
@@ -67,7 +69,8 @@ else
 end
 p.addParameter('NumIntegrationPoints', [], validPts);
 p.addParameter('AnalyticalJacobian', 'off', validOnOff);
-p.addParameter('InitialSlope', [], validHandle);
+validInitSlope= @(x) isnumeric(x) || validHandle(x);
+p.addParameter('InitialSlope', [], validInitSlope);
 validInitFunc = @(x) isempty(x) || validHandle(x);
 p.addParameter('eqnDiagnosticsInitFunc', [], validInitFunc);
 validDOFMap = @(x) all(isfinite(x) & x==floor(x) & x>0);
@@ -78,6 +81,8 @@ p.parse(m,pde,ic,bc,xmesh,t,varargin{:});
 pdeOpts = PDEOptions;
 pdeOpts.hasODE = hasODE;
 pdeOpts.cicMethod = p.Results.cicMethod;
+pdeOpts.cicAbsTol = p.Results.cicAbsTol;
+pdeOpts.cicRelTol = p.Results.cicRelTol;
 pdeOpts.icDiagnostics=p.Results.ICDiagnostics;
 eqnDiagnostics=p.Results.EqnDiagnostics;
 pdeOpts.eqnDiagnostics=eqnDiagnostics;
@@ -91,22 +96,9 @@ pdeOpts.testFunctionDOFMap = p.Results.testFunctionDOFMap;
 pdeOpts.polyOrder = p.Results.PolyOrder;
 pdeOpts.odeSolver = p.Results.OdeSolver;
 
-polyOrd=pdeOpts.polyOrder;
-if polyOrd>1
+if pdeOpts.polyOrder>1
   % add intermediate nodes for higher-order elems
-  numNodesOrig = length(xmesh);
-  numElems=numNodesOrig-1;
-  elemLen=xmesh(2:end)-xmesh(1:end-1);
-  del=elemLen/polyOrd;
-  numNodesNew=numElems*polyOrd+1;
-  xn=zeros(1,numNodesNew);
-  ii=1:polyOrd:numNodesNew-polyOrd;
-  xn([ii end])=xmesh;
-  for i=2:polyOrd
-    ii=ii+1;
-    xn(ii)=xmesh(1:end-1)+(i-1)*del;
-  end
-  xmesh=xn;
+  xmesh=pdeRefineMesh(xmesh, pdeOpts.polyOrder);
 end
 
 if  hasODE

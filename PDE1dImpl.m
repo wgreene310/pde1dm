@@ -158,7 +158,10 @@ classdef PDE1dImpl < handle
         icf = @(t,y,yp) self.calcResidual(t,y,yp,depVarClassType);
         t0 = self.tspan(1);
         n=length(self.y0);
-        yp0 = zeros(n,1);
+        yp0 = self.pdeOpts.initialSlope;
+        if isempty(yp0)
+          yp0 = zeros(n,1);
+        end
         %fixed_y0 = ones(n,1);
         %fixed_y0 = [ones(n-1,1);0];
         %fixed_y0 = [0; ones(n-1,1)];
@@ -170,11 +173,11 @@ classdef PDE1dImpl < handle
           % free any dofs that are obviously algebraic
           [dfdy,dfdyp]=self.calcSparseJacobian(t0, self.y0, yp0);
           if 0
-          for i=1:n
-            if all(dfdyp(i,:)==0) && all(dfdyp(:,i)==0)
-              fixed_y0(i)=0;
+            for i=1:n
+              if all(dfdyp(i,:)==0) && all(dfdyp(:,i)==0)
+                fixed_y0(i)=0;
+              end
             end
-          end
           else
             [Q,R,E] = qr(full(dfdyp));
             adr=abs(diag(R));
@@ -187,14 +190,26 @@ classdef PDE1dImpl < handle
         end
         %icf(0,y0,yp0)'
         fixed_yp0 = zeros(n,1);
-        icopts.AbsTol=abstol/10;
-        icopts.RelTol=reltol/10;
-        icopts.icdiagnostics=icdiag;
-        y0Save = self.y0;
-        if self.pdeOpts.cicMethod==1
-          [y0,yp0]=decic(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0);
+        if ~isempty(self.pdeOpts.cicAbsTol)
+          icopts.AbsTol= self.pdeOpts.cicAbsTol;
         else
-          [y0,yp0]=decicShampine(icf, t0,self.y0,fixed_y0,yp0,fixed_yp0,icopts);
+          icopts.AbsTol=abstol/10;
+        end
+        if ~isempty(self.pdeOpts.cicRelTol)
+          icopts.RelTol= self.pdeOpts.cicRelTol;
+        else
+          icopts.RelTol=reltol/10;
+        end
+        icopts.Jacobian = @self.calcJacobian;
+        
+        y0=self.y0;
+        y0Save = y0;
+        if self.pdeOpts.cicMethod==1
+          [y0,yp0]=decic(icf, t0,y0,fixed_y0,yp0,fixed_yp0,icopts);
+        elseif self.pdeOpts.cicMethod==0
+          icopts.icdiagnostics=icdiag;
+          icopts.maxiter=30;
+          [y0,yp0]=decicShampine(icf, t0,y0,fixed_y0,yp0,fixed_yp0,icopts);
         end
         if(icdiag)
           prtShortVec(self.xmesh, 'x');
@@ -210,8 +225,6 @@ classdef PDE1dImpl < handle
           prtShortVec(I(chgI), 'changed y0 equations');
           prtShortVec(y0, 'y0');
           prtShortVec(yp0, 'yp0', 1, '%16.8g');
-        end
-        if(icdiag)
           prtShortVec(icf(t0,y0,yp0), 'res');
         end
       end
@@ -225,7 +238,7 @@ classdef PDE1dImpl < handle
       opts=odeset(opts, 'abstol', abstolVec);
       if(self.analyticalJacobian)
         %disp('Using MatlabAutoDiff for Jacobian Evaluations');
-        jacFunc = @(time, u, up) self.calcAnalJacobianODE(time, u, up);
+        jacFunc = @(time, u, up) self.calcJacobianAutoDiff(time, u, up);
         opts=odeset(opts, 'jacobian', jacFunc);
       elseif self.pdeOpts.useInternalNumJac
         jacFunc = @(time, u, up) self.calcSparseJacobian(time, u, up);
@@ -254,15 +267,20 @@ classdef PDE1dImpl < handle
       
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;
-      tol=1e-12;
+      tol=1e-10;
       % flag dirichlet contraints
       xl = self.xmesh(1);
       xr = self.xmesh(end);
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
+      if 0
       y0Ode = self.odeVFromSysVec(self.y0);
       yp0Ode = 0*y0Ode;
+      else
+        y0Ode=[];
+        yp0Ode=[];
+      end
       [pl,ql,pr,qr] = callVarargFunc(self.bcFunc, ...
         {xl, ul,xr,ur,t0,y0Ode,yp0Ode});
       self.dirConsFlagsLeft = ql~=0;
@@ -275,7 +293,7 @@ classdef PDE1dImpl < handle
       maxIter = 10;
       it=1;
       converged = false;
-      debug = 0;
+      debug = 1;
       resFunc = @(u) self.calcResidual(0,u,up,u);
       while(it<maxIter)
         if debug> 1
@@ -291,7 +309,7 @@ classdef PDE1dImpl < handle
           break;
         end
         if self.analyticalJacobian
-          J=self.calcAnalJacobianODE(0, u, up);
+          J=self.calcJacobianAutoDiff(0, u, up);
         else
           J=self.calcJacobian(0, u, up);
         end      
@@ -426,6 +444,23 @@ classdef PDE1dImpl < handle
       R=-R;
     end 
     
+    function [dfdy, dfdyp]=calcJacobian(self, time, u, up)
+      if(self.analyticalJacobian)
+        [dfdy, dfdyp]=self.calcJacobianAutoDiff(time, u, up);
+      else
+        [dfdy, dfdyp]=self.calcSparseJacobian(time, u, up);
+      end
+    end
+    
+    function [dfdy, dfdyp]=calcJacobianAutoDiff(self, time, u, up)
+      %u=u(:);
+      %up=up(:);
+      autoDiffF = @(u) self.calcResidual(time, u, up, u);
+      dfdy = AutoDiffJacobianAutoDiff(autoDiffF, u);
+      autoDiffF = @(up) self.calcResidual(time, u, up, up);
+      dfdyp = AutoDiffJacobianAutoDiff(autoDiffF, up);
+    end
+    
   end % methods
 	
   methods(Access=private)
@@ -449,7 +484,8 @@ classdef PDE1dImpl < handle
       self.y0 = [self.y0FEM(:); v0; zeros(numODEEqn-nV,1)];
     end
 
-    function jac=calcJacobian(self, time, u, up)
+    function jac=calcJacobianFullFD(self, time, u, up)
+      % testing only
       u=u(:);
       up=up(:);
       ne = length(u);
@@ -467,7 +503,9 @@ classdef PDE1dImpl < handle
       end
     end
     
-    function jac=calcJacobianCD(self, time, u)
+    function jac=calcJacobianFullCD(self, time, u)
+      % testing only
+      % currently unused
       jac = zeros(self.numFEMEqns, self.numFEMEqns);
       disp('calc dFdu by central difference');
       depVarClassType=u;
@@ -500,13 +538,6 @@ classdef PDE1dImpl < handle
         M(:,i) = (rp-r0)/h;     
         up(i) = upsave;
       end
-    end
-    
-    function [dfdy, dfdyp]=calcAnalJacobianODE(self, time, u, up)
-      autoDiffF = @(u) self.calcResidual(time, u, up, u);
-      dfdy = AutoDiffJacobianAutoDiff(autoDiffF, u);
-      autoDiffF = @(up) self.calcResidual(time, u, up, up);
-      dfdyp = AutoDiffJacobianAutoDiff(autoDiffF, up);
     end
     
     function [R,Cxd]=applyConstraints(self, R, Cxd, u,v, vDot,time)
