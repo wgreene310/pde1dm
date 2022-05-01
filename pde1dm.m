@@ -20,7 +20,7 @@ function [sol,varargout] = pde1dm (m, pde,ic,bc,xmesh,t,varargin)
 
 if(~ismember(nargin,[6 7 9 10]))
   error('pde1d:nrhs', ...
-  'Illegal number of arguments passed to pde1dM');
+  'Illegal number of arguments passed to pde1dm');
 end
 hasODE = nargin > 7;
 
