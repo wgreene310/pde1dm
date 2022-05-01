@@ -79,7 +79,7 @@ classdef PDEMeshMapper < handle
       numDepVars = size(srcU,1);
       numDest = length(self.destMesh);
       if self.allocTmp
-        self.destU = zerosLike(numDepVars, numDest, srcU);
+        self.destU = zeros(numDepVars, numDest, 'like', srcU);
         self.allocTmp=false;
       end
       for i=1:numDest

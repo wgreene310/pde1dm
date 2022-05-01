@@ -199,7 +199,7 @@ classdef ODEImpl
           self.numODEEquations);
       end
       sqrtEps = sqrt(eps);
-      dFdu = zerosLike(self.numODEEquations, numDepVars, numNodes, u2);
+      dFdu = zeros(self.numODEEquations, numDepVars, numNodes, 'like', u2);
       dni = mm.destNodeIndex;
       for ii=1:length(dni)
         i = dni(ii);
@@ -221,7 +221,7 @@ classdef ODEImpl
       end
       uOde=mm.mapFunction(u2);
       dudxOde=mm.mapFunctionDer(u2);
-      dFduDot = zerosLike(self.numODEEquations, numDepVars, numNodes, up2);
+      dFduDot = zeros(self.numODEEquations, numDepVars, numNodes, 'like',up2);
       for ii=1:length(dni)
         i = dni(ii);
         for j=1:numDepVars

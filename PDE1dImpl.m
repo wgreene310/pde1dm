@@ -289,7 +289,7 @@ classdef PDE1dImpl < handle
       %prtShortVec(obj.y0, 'y0');
       
       u=self.y0;
-      up=zerosLike(self.totalNumEqns,1,u);
+      up=zeros(self.totalNumEqns,1,'like', u);
       maxIter = 10;
       it=1;
       converged = false;
@@ -592,9 +592,9 @@ classdef PDE1dImpl < handle
     function [F, S, Cv, f] = calcFEMEqns(self, t, u,up, v, vDot, depVarClassType)
       ndv=self.numDepVars;
       nn  = self.numNodes;
-      Cv = zerosLike(ndv, nn, depVarClassType);
-      F = zerosLike(ndv, nn, depVarClassType);
-      S = zerosLike(ndv, nn, depVarClassType);
+      Cv = zeros(ndv, nn, 'like', depVarClassType);
+      F = zeros(ndv, nn, 'like', depVarClassType);
+      S = zeros(ndv, nn, 'like', depVarClassType);
       
       gPts = self.intRule.points;
       gWts = self.intRule.wts;
@@ -611,8 +611,8 @@ classdef PDE1dImpl < handle
       i1=1:nenM1:nn-nen+1;
       i2=nen:nenM1:nn;
       jac=(x(i2)-x(i1))/2;
-      uPts = zerosLike(ndv, numXpts,  depVarClassType);
-      duPts = zerosLike(ndv, numXpts, depVarClassType);
+      uPts = zeros(ndv, numXpts,  'like', depVarClassType);
+      duPts = zeros(ndv, numXpts, 'like', depVarClassType);
       ip = 1:numIntPts:numXpts-numIntPts+1;
       for i=1:numIntPts
         jj=nenM1;
@@ -635,8 +635,8 @@ classdef PDE1dImpl < handle
         self.checkCoefficientMatrixSizeVec(s, 's');
         %prtMat(s, 's');
       else
-        f = zerosLike(ndv, numXpts, depVarClassType);
-        s = zerosLike(ndv, numXpts, depVarClassType);
+        f = zeros(ndv, numXpts, 'like', depVarClassType);
+        s = zeros(ndv, numXpts, 'like', depVarClassType);
         for i=1:size(self.xPts,2)
           [ci,fi,si] = ...
             callVarargFunc(self.pdeFunc, ...
@@ -648,9 +648,9 @@ classdef PDE1dImpl < handle
         s(:,i) = si;
         if i==1
           if isFullCMat
-            c = zerosLike(ndv, ndv, numXpts, depVarClassType);
+            c = zeros(ndv, ndv, numXpts, 'like', depVarClassType);
           else
-            c = zerosLike(ndv, numXpts, depVarClassType);
+            c = zeros(ndv, numXpts, 'like', depVarClassType);
           end
         end
           if isFullCMat
