@@ -1,19 +1,19 @@
-%  
+%
 %   This library is free software; you can redistribute it and/or
 %   modify it under the terms of the GNU General Public License
 %   as published by the Free Software Foundation; either version 3
 %   of the License, or (at your option) any later version.
-%  
+%
 %   This library is distributed in the hope that it will be useful,
 %   but WITHOUT ANY WARRANTY; without even the implied warranty of
 %   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 %   General Public License for more details.
-%  
+%
 %   You should have received a copy of the GNU General Public License
 %   along with this library; if not, visit
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
-% 
+%
 % Copyright (C) 2016-2021 William H. Greene
 
 function [sol,varargout] = pde1dm (m, pde,ic,bc,xmesh,t,varargin)
@@ -170,3 +170,38 @@ if(~valid)
   error('pde1d:time_type', 'Illegal value of tspan');
 end
 end
+
+% Octave-style unit test
+%!test
+%! L=2;
+%! n=31;
+%! n2 = ceil(n/2);
+%! x = linspace(0,L,n);
+%! tfinal=.3;
+%! t = linspace(0,tfinal,20);
+%! alpha=3;
+%! m=0;
+%! icFunc = @(x) sin(pi*x/L);
+%! pdeFunc = @(x,t,u,DuDx) pde(x,t,u,DuDx,alpha);
+%! u = pde1dm(m, pdeFunc,icFunc,@bcFunc,x,t);
+%! analyticalSoln=exp(-t'*(pi/L)^2*alpha)*sin(pi*x/L);
+%! solnDiff=max(abs(u(:)-analyticalSoln(:)));
+%! fprintf('Maximum difference between analytical and numerical solutions=%g\n', ...
+%!   solnDiff);
+%! assert (solnDiff, 0.0, .002)
+%! doPlots=false;
+%! if doPlots
+%!   figure; plot(x, u(end,:), x, analyticalSoln(end,:), 'o');
+%!   figure; plot(t, u(:,n2), t, analyticalSoln(:,n2), 'o');
+%! end
+%! function [c,f,s] = pde(x,t,u,DuDx,alpha)
+%! c=1;
+%! f=alpha*DuDx;
+%! s=0;
+%! end
+%! function [pl,ql,pr,qr] =bcFunc(xl,ul,xr,ur,t)
+%! pl=ul;
+%! ql=0;
+%! pr=ur;
+%! qr=0;
+%! end
