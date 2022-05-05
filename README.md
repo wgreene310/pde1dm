@@ -17,7 +17,7 @@ starts at zero, `pdepe` uses special approximation functions to account
 for the singularity at this point; `pde1dm` does not. Also, `pdepe` supports
 an event detection capability; `pde1dm` currently does not support events.
 
-Several examples and basic documentation are included.
+Several examples and basic documentation are included in the [user guide](documents/pde1dM_manual.pdf).
 An excellent introduction to solving PDE with the `pdepe` function is
 Professor Howard's note,
 [Partial Differential Equations in MATLAB 7.0](http://www.math.tamu.edu/~phoward/m442/pdemat.pdf). 
