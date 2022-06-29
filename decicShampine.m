@@ -192,7 +192,10 @@ while(it <= maxIter)
       y0_new(free_y0) = y0_new(free_y0) + w;
       w1p = R11\(d(difdofs) - S(difdofs,:)*w);
     else
+      orig_state = warning;
+      warning('off', 'all');
       w1p = R11\d(difdofs);
+      warning(orig_state);
     end
     maxDeltaYp = norm(w1p,1);
     wp = zeros(nu,1);
