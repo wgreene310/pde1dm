@@ -13,7 +13,7 @@ odeIcF = @() odeIcFunc(0);
 pdeF = @(x,t,u,DuDx,v,vdot) pdeFunc(x,t,u,DuDx,v,vdot,D,C);
 odeF = @odeFunc;
 bcF = @bcFunc;
-[u,uode] = pde1dM(m,pdeF,icF,bcF,x,t,odeF, odeIcF,xOde);
+[u,uode] = pde1dm(m,pdeF,icF,bcF,x,t,odeF, odeIcF,xOde);
 
 figure; plot(x, u(end,:)); grid on;
 xlabel('x');
