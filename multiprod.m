@@ -10,7 +10,7 @@ function c = multiprod(a, b, idA, idB)
 %   For instance, a 5-by-6-by-3 array may be viewed as an array containing five
 %   6-by-3 blocks. In this case, its size is denoted by 5-by-(6-by-3). The 1 or 2
 %   adjacent dimensions along which the blocks are contained are called the
-%   "internal dimensions" (IDs) of the array (°).
+%   "internal dimensions" (IDs) of the array (**).
 %
 %   1) 2-D by 2-D BLOCK(S) (*)
 %         C = MULTIPROD(A, B, [DA1 DA2], [DB1 DB2]) contains the products
@@ -82,7 +82,7 @@ function c = multiprod(a, b, idA, idB)
 %   performed by DOT2, OUTER, and CROSS2 (MATLAB Central, file #8782).
 %   Elementwise multiplications (see TIMES) and other elementwise binary
 %   operations with AX enabled are performed by BAXFUN (MATLAB Central,
-%   file #23084). Together, these functions make up the “ARRAYLAB toolbox”.
+%   file #23084). Together, these functions make up the "ARRAYLAB toolbox".
 %
 %   Input and output format:
 %      The size of the EDs of C is determined by AX. Block size is
@@ -124,10 +124,10 @@ function c = multiprod(a, b, idA, idB)
 %   Terminological notes:
 %   (*) 1-D and 2-D blocks are generically referred to as "vectors" and 
 %       "matrices", respectively. However, both may be also called
-%       “scalars” if they have a single element. Moreover, matrices with a
-%       single row or column (e.g. 1-by-3 or 3-by-1) may be also called “row
-%       vectors” or “column vectors”.
-%   (°) Not to be confused with the "inner dimensions" of the two matrices
+%       "scalars" if they have a single element. Moreover, matrices with a
+%       single row or column (e.g. 1-by-3 or 3-by-1) may be also called "row
+%       vectors" or "column vectors".
+%   (**) Not to be confused with the "inner dimensions" of the two matrices
 %       involved in a product X * Y, defined as the 2nd dimension of X and
 %       the 1st of Y (DA2 and DB1 in syntaxes 1, 2, 3).
 %
