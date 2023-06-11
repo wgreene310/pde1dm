@@ -42,6 +42,7 @@ classdef ODEImpl
       v0Dot=zeros(obj.numODEVariables,1);
       fOde=obj.calcFOdePts(xIntPts, fIntPts);
       f=obj.calcODEResidual(t0, u2, up2, fOde, obj.y0Ode, v0Dot);
+      f=f(:);
       nOde = size(f,1);
       obj.numODEEquations = nOde;
       %obj.numODELagMult = obj.numODEEquations-obj.numODEVariables;
@@ -154,6 +155,7 @@ classdef ODEImpl
       dupdxOde=mm.mapFunctionDer(up2);
       f0 = callVarargFunc(self.odeFunc, ...
         {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+      f0=f0(:);
       if size(f0,1) ~= mOde
         error('Number of rows returned from ODE function must be %d.\n', ...
           mOde);
@@ -166,6 +168,7 @@ classdef ODEImpl
         v(i) = v(i) + h;
         fp = callVarargFunc(self.odeFunc, ...
           {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+        fp=fp(:);
         dFdv(:,i) = (fp-f0)/h;
         v(i) = vSave;
       end
@@ -179,6 +182,7 @@ classdef ODEImpl
         vDot(i) = vDot(i) + h;
         fp = callVarargFunc(self.odeFunc, ...
           {time, v, vDot, self.odeMesh, uOde, dudxOde, fluxOde, upOde, dupdxOde});
+        fp=fp(:);
         dFdvDot(:,i) = (fp-f0)/h;
         vDot(i) = vDotSave;
       end
@@ -292,7 +296,7 @@ classdef ODEImpl
     end
     
     function fOde=calcFOdePts(self, xIntPts, fIntPts)
-      fOde=interp1(xIntPts, fIntPts', self.odeMesh)';
+      fOde=interp1(xIntPts, fIntPts', self.odeMesh, 'linear', 'extrap')';
     end
   end
   

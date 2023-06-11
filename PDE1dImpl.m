@@ -467,6 +467,7 @@ classdef PDE1dImpl < handle
     
     function setODE(self, odeFunc, odeICFunc, odeMesh)
       v0=odeICFunc();
+      v0=v0(:);
       nV = size(v0,1);
       v0Dot = zeros(nV,1);
       t0 = self.tspan(1);
@@ -611,6 +612,7 @@ classdef PDE1dImpl < handle
       i1=1:nenM1:nn-nen+1;
       i2=nen:nenM1:nn;
       jac=(x(i2)-x(i1))/2;
+      dNdx=zeros(nen, length(jac));
       uPts = zeros(ndv, numXpts,  'like', depVarClassType);
       duPts = zeros(ndv, numXpts, 'like', depVarClassType);
       ip = 1:numIntPts:numXpts-numIntPts+1;
@@ -662,7 +664,7 @@ classdef PDE1dImpl < handle
       end
       if(all(c==0))
         error('pde1d:no_parabolic_eqn', ...
-          "At least one of the entries in the c-coefficient vector must be non-zero.");
+          'At least one of the entries in the c-coefficient vector must be non-zero.');
       end
       
       % form global vectors
