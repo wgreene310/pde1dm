@@ -1,23 +1,23 @@
-%  
+%
 %   This library is free software; you can redistribute it and/or
 %   modify it under the terms of the GNU General Public License
 %   as published by the Free Software Foundation; either version 3
 %   of the License, or (at your option) any later version.
-%  
+%
 %   This library is distributed in the hope that it will be useful,
 %   but WITHOUT ANY WARRANTY; without even the implied warranty of
 %   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 %   General Public License for more details.
-%  
+%
 %   You should have received a copy of the GNU General Public License
 %   along with this library; if not, visit
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
-% 
-% Copyright (C) 2016-2021 William H. Greene
+%
+% Copyright (C) 2016-2023 William H. Greene
 
 classdef PDE1dImpl < handle
-  
+
   %% Main implementaton class for PDE solver.
 
   properties
@@ -26,9 +26,9 @@ classdef PDE1dImpl < handle
      numDepVars;
      mCoord;
    end
-  
+
   methods
-    
+
     function obj=PDE1dImpl(m, pdeFunc,icFunc,bcFunc,x,t,opts, ...
         odeFunc, odeICFunc, odeMesh)
     if(~isscalar(m) || ~isnumeric(m) || (m ~= 0 && m ~=1 && m ~=2))
@@ -71,7 +71,7 @@ classdef PDE1dImpl < handle
       obj.y0FEM(:,i) = icFunc(x(i));
     end
     obj.y0 = obj.y0FEM(:);
-    
+
     obj.numElems=(obj.numNodes-1)/(obj.numElemNodes-1);
     numXpts = obj.numElems*obj.numIntegrationPoints;
     % calc xpts for the mesh
@@ -106,18 +106,18 @@ classdef PDE1dImpl < handle
       end
       ip = ip + 1;
     end
-    
+
     obj.isOctave = exist('OCTAVE_VERSION', 'builtin');
-    
+
     if obj.hasODE
       obj.setODE(odeFunc, odeICFunc, odeMesh);
     end
-    
+
     end
-    
-		
+
+
     function [u,varargout]=solveTransient(self, odeOpts)
-      
+
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;
       % flag dirichlet contraints
@@ -126,7 +126,7 @@ classdef PDE1dImpl < handle
       ul = self.y0FEM(:,1);
       ur = self.y0FEM(:,end);
       t0 = self.tspan(1);
-      
+
       if self.hasODE
         y0Ode = self.odeImpl.getVFromSysVec(self.y0);
         yp0Ode = zeros(self.odeImpl.numODEEquations,1);
@@ -140,7 +140,7 @@ classdef PDE1dImpl < handle
       self.dirConsFlagsRight = qRight~=0;
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
-      
+
       massFunc = @(time, u, up) self.calcMassMat(time, u, up);
       rhsFunc = @(time, u, up) self.calcRHS(time, u, up);
       %opts=odeset('reltol', reltol, 'abstol', abstol);
@@ -201,7 +201,7 @@ classdef PDE1dImpl < handle
           icopts.RelTol=reltol/10;
         end
         icopts.Jacobian = @self.calcJacobian;
-        
+
         y0=self.y0;
         y0Save = y0;
         if self.pdeOpts.cicMethod==1
@@ -228,7 +228,7 @@ classdef PDE1dImpl < handle
           prtShortVec(icf(t0,y0,yp0), 'res');
         end
       end
-      
+
       abstolVec=abstol*ones(self.totalNumEqns,1);
       % use large convergence tolerance on algebraic eqns
       M= self.calcMassMat(t0, y0, yp0);
@@ -243,12 +243,12 @@ classdef PDE1dImpl < handle
       elseif self.pdeOpts.useInternalNumJac
         jacFunc = @(time, u, up) self.calcSparseJacobian(time, u, up);
         opts=odeset(opts, 'jacobian', jacFunc);
-      else 
+      else
         % octave ode15i doesn't have JPattern option
         jPat = self.calcJacPattern;
         opts=odeset(opts, 'jpattern', {jPat, jPat});
       end
-      
+
       if(useOde15i)
         [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
       else
@@ -262,9 +262,9 @@ classdef PDE1dImpl < handle
         u= u(:,1:self.numFEMEqns);
       end
     end
-    
+
     function [u,varargout]=solveStatic(self, odeOpts)
-      
+
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;
       tol=1e-10;
@@ -287,7 +287,7 @@ classdef PDE1dImpl < handle
       self.dirConsFlagsRight = qr~=0;
       %fprintf('numDepVars=%d\n', obj.numDepVars);
       %prtShortVec(obj.y0, 'y0');
-      
+
       u=self.y0;
       up=zeros(self.totalNumEqns,1,'like', u);
       maxIter = 10;
@@ -312,7 +312,7 @@ classdef PDE1dImpl < handle
           J=self.calcJacobianAutoDiff(0, u, up);
         else
           J=self.calcJacobian(0, u, up);
-        end      
+        end
         %prtMat(J,'J');
         du = J\r;
         if debug> 1
@@ -327,10 +327,10 @@ classdef PDE1dImpl < handle
       if(self.hasODE)
         uODE = u(:,end-self.numODE+1:end);
         varargout{1} = uODE;
-      end  
+      end
       u=self.femU2FromSysVec(u);
     end
-    
+
     function testFuncs(self)
       ne = self.totalNumEqns;
       %u = zeros(ne, 1);
@@ -407,7 +407,7 @@ classdef PDE1dImpl < handle
         self.odeImpl.testFuncs(us, ups, self.xPts, fIntPts, v, vDot);
       end
     end
-    
+
     function R = calcResidual(self, time, u, up, depVarClassType)
       if nargin<4
         depVarClassType=u;
@@ -415,7 +415,7 @@ classdef PDE1dImpl < handle
       [rhs,Cxd] = calcRHS(self, time, u, up, depVarClassType);
       R = Cxd+rhs;
     end
-    
+
     function [R,Cxd] = calcRHS(self, time, u, up, depVarClassType)
       if nargin<4
         depVarClassType=u;
@@ -442,8 +442,8 @@ classdef PDE1dImpl < handle
       % add constraints
       [R,Cxd]=self.applyConstraints(R,Cxd, uFEM,v,vDot,time);
       R=-R;
-    end 
-    
+    end
+
     function [dfdy, dfdyp]=calcJacobian(self, time, u, up)
       if(self.analyticalJacobian)
         [dfdy, dfdyp]=self.calcJacobianAutoDiff(time, u, up);
@@ -451,7 +451,7 @@ classdef PDE1dImpl < handle
         [dfdy, dfdyp]=self.calcSparseJacobian(time, u, up);
       end
     end
-    
+
     function [dfdy, dfdyp]=calcJacobianAutoDiff(self, time, u, up)
       %u=u(:);
       %up=up(:);
@@ -460,11 +460,11 @@ classdef PDE1dImpl < handle
       autoDiffF = @(up) self.calcResidual(time, u, up, up);
       dfdyp = AutoDiffJacobianAutoDiff(autoDiffF, up);
     end
-    
+
   end % methods
-	
+
   methods(Access=private)
-    
+
     function setODE(self, odeFunc, odeICFunc, odeMesh)
       v0=odeICFunc();
       v0=v0(:);
@@ -498,12 +498,12 @@ classdef PDE1dImpl < handle
         usave = u(i);
         h = sqrtEps * max(usave, 1);
         u(i) = u(i) + h;
-        rp = calcResidual(self, time, u, up, depVarClassType);      
-        jac(:,i) = (rp-r0)/h;     
+        rp = calcResidual(self, time, u, up, depVarClassType);
+        jac(:,i) = (rp-r0)/h;
         u(i) = usave;
       end
     end
-    
+
     function jac=calcJacobianFullCD(self, time, u)
       % testing only
       % currently unused
@@ -522,7 +522,7 @@ classdef PDE1dImpl < handle
         u(i) = usave;
       end
     end
-    
+
     function M=calcMassMat(self, time, u, up)
       u=u(:);
       up=up(:);
@@ -535,12 +535,12 @@ classdef PDE1dImpl < handle
         upsave = up(i);
         h = sqrtEps * max(upsave, 1);
         up(i) = up(i) + h;
-        rp = calcResidual(self, time, u, up, depVarClassType);      
-        M(:,i) = (rp-r0)/h;     
+        rp = calcResidual(self, time, u, up, depVarClassType);
+        M(:,i) = (rp-r0)/h;
         up(i) = upsave;
       end
     end
-    
+
     function [R,Cxd]=applyConstraints(self, R, Cxd, u,v, vDot,time)
       u2=self.femU2FromSysVec(u);
       x = self.xmesh;
@@ -557,20 +557,22 @@ classdef PDE1dImpl < handle
       m=self.mCoord;
       sing = m~=0 && xl==0;
       for i=1:self.numDepVars
-        if(ql(i) ~= 0)
-          qli = ql(i);
-          if ~sing
-            if (m == 1)
-              qli = qli/xl;
-            elseif(m==2)
-              qli = qli/(xl*xl);
+        if ~(sing && self.pdeOpts.automaticBCAtCenter)
+          if(ql(i) ~= 0)
+            qli = ql(i);
+            if ~sing
+              if (m == 1)
+                qli = qli/xl;
+              elseif(m==2)
+                qli = qli/(xl*xl);
+              end
             end
+            R(i) =  R(i) - pl(i)/qli;
+          else
+            % apply dirichlet constraint
+            R(i) = -pl(i);
+            Cxd(i) = 0;
           end
-          R(i) =  R(i) - pl(i)/qli;
-        else
-          % apply dirichlet constraint
-          R(i) = -pl(i);
-          Cxd(i) = 0;
         end
         if(qr(i) ~= 0)
           qri = qr(i);
@@ -589,14 +591,14 @@ classdef PDE1dImpl < handle
      %R = -F + S;
      R = -R;
     end
-    
+
     function [F, S, Cv, f] = calcFEMEqns(self, t, u,up, v, vDot, depVarClassType)
       ndv=self.numDepVars;
       nn  = self.numNodes;
       Cv = zeros(ndv, nn, 'like', depVarClassType);
       F = zeros(ndv, nn, 'like', depVarClassType);
       S = zeros(ndv, nn, 'like', depVarClassType);
-      
+
       gPts = self.intRule.points;
       gWts = self.intRule.wts;
       numIntPts = length(gPts);
@@ -627,7 +629,7 @@ classdef PDE1dImpl < handle
         duPts(:,ip) = duPts(:,ip)./jac;
         ip = ip + 1;
       end
- 
+
       if(self.vectorized)
         % call pde func for all points
         [c,f,s] = callVarargFunc(self.pdeFunc, ...
@@ -666,7 +668,7 @@ classdef PDE1dImpl < handle
         error('pde1d:no_parabolic_eqn', ...
           'At least one of the entries in the c-coefficient vector must be non-zero.');
       end
-      
+
       % form global vectors
       m = self.mCoord;
       if(m==1)
@@ -718,7 +720,7 @@ classdef PDE1dImpl < handle
       S=S(:);
       Cv=Cv(:);
     end
-    
+
     function printSystemVector(self, v, name, varargin)
       if ~self.hasODE
         m = reshape(v, self.numDepVars, []);
@@ -727,7 +729,7 @@ classdef PDE1dImpl < handle
         prtShortVec(v, name, varargin{:});
       end
     end
-    
+
     function checkCoefficientMatrixSize(self, coeffs, coeffsName)
       reqSize=[self.numDepVars, 1];
       sc = size(coeffs);
@@ -740,7 +742,7 @@ classdef PDE1dImpl < handle
           sc(1), sc(2), reqSize(1), reqSize(2));
       end
     end
-    
+
     function isFullCMat=checkCCoefficientMatrixSize(self, c)
       ndv = self.numDepVars;
       sc = size(c);
@@ -777,7 +779,7 @@ classdef PDE1dImpl < handle
           sc(1), sc(2), reqSize(1), reqSize(2));
       end
     end
-    
+
     function isFullCMat=checkCCoefficientMatrixSizeVec(self, coeffs)
       numXpts = size(self.xPts,2);
       ndv = self.numDepVars;
@@ -799,11 +801,11 @@ classdef PDE1dImpl < handle
             'expected size is %d x %d x %d.'], sc(1), sc(2), sc(3), ndv, ndv, numXpts);
         else
           emsg=[emsg 'an incorrect number of dimensions.'];
-        end         
+        end
         error('pde1d:coeffSize', emsg);
       end
     end
-    
+
     function J=calcJacPattern(self)
       if ~isempty(self.jacobianPattern)
         J = self.jacobianPattern;
@@ -816,7 +818,7 @@ classdef PDE1dImpl < handle
       po = self.pdeOpts.polyOrder;
       inds=-po:po;
       J = kron( spdiags(ones(nn,length(inds)),inds,nn,nn), ones(ndv,ndv));
-      
+
       % odes may couple with any other vars
       if self.hasODE
         numODE = self.odeImpl.numODEEquations;
@@ -827,7 +829,7 @@ classdef PDE1dImpl < handle
       end
       self.jacobianPattern = J;
     end
-    
+
     function [dfdy, dfdyp]=calcSparseJacobian(self, time, u, up)
       jPattern = self.calcJacPattern;
       if isempty(self.jacobianGroupList)
@@ -838,16 +840,16 @@ classdef PDE1dImpl < handle
       f = @(time, up) self.calcResidual(time, u, up, up);
       dfdyp=numericalJacobian(f, jPattern, up, time, self.jacobianGroupList);
     end
-    
+
     function v=femUFromSysVec(self,v)
       v=v(:);
       v = v(1:self.numFEMEqns);
     end
-    
+
     function v2=femU2FromSysVec(self,v)
       v2 = reshape(v(1:self.numFEMEqns), self.numDepVars, []);
     end
-    
+
     function checkBCSize(self, bc)
       sb = size(bc);
       if any(sb ~= [self.numDepVars 1])
@@ -856,28 +858,28 @@ classdef PDE1dImpl < handle
         error('pde1d:bcSize', bcErrMsg, bcName, sb(1));
       end
     end
-    
+
 	end % methods
-  
+
   methods(Access=public, Static)
-    
+
     function shp = shapeLine2( r )
       shp = [(1-r)/2 (1+r)/2]';
     end
-    
+
     function ds = dShapeLine2( r )
       ds = [-.5 .5]'*ones(1,length(r));
     end
-    
+
     function shp = shapeLine3( r )
       shp = [-r.*(1-r)/2 1-r.^2 r.*(1+r)/2]';
     end
-    
+
     function ds = dShapeLine3( r )
       r=r(:)';
       ds = [-.5+r; -2*r; .5+r];
     end
-    
+
     function shp = shapeLine4( r )
       r=r(:)';
       rp1=r+1;
@@ -890,7 +892,7 @@ classdef PDE1dImpl < handle
         9/16*(rp1).*(rp13).*(rm13)
         ];
     end
-    
+
     function ds = dShapeLine4( r )
       r=r(:)';
       rp1=r+1;
@@ -904,9 +906,9 @@ classdef PDE1dImpl < handle
         9/16*(rp1.*rp13 + rp1.*rm13 + rm13.*rp13)
         ];
     end
-    
+
   end % methods
-  
+
   properties(Access=private)
     isOctave;
     intRule;
@@ -926,6 +928,6 @@ classdef PDE1dImpl < handle
     % temporary arrays for vectorized mode
     xPts;
   end
-  
+
 end % classdef
 

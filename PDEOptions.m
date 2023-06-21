@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-%   Copyright (C) 2016-2021 William H. Greene
+%   Copyright (C) 2016-2023 William H. Greene
 
 classdef PDEOptions
   
@@ -28,6 +28,7 @@ classdef PDEOptions
     testFunctionDOFMap;
     polyOrder;
     odeSolver, cicMethod, cicAbsTol, cicRelTol;
+    automaticBCAtCenter;
   end
   
   methods
@@ -53,6 +54,7 @@ classdef PDEOptions
       obj.cicAbsTol=[];
       obj.cicRelTol=[];
       obj.odeSolver = 0;
+      obj.automaticBCAtCenter=false;
     end
   end
 end

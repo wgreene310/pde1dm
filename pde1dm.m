@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 %
-% Copyright (C) 2016-2021 William H. Greene
+% Copyright (C) 2016-2023 William H. Greene
 
 function [sol,varargout] = pde1dm (m, pde,ic,bc,xmesh,t,varargin)
 
@@ -75,6 +75,7 @@ validInitFunc = @(x) isempty(x) || validHandle(x);
 p.addParameter('eqnDiagnosticsInitFunc', [], validInitFunc);
 validDOFMap = @(x) all(isfinite(x) & x==floor(x) & x>0);
 p.addParameter('testFunctionDOFMap', [], validDOFMap);
+p.addParameter('automaticBCAtCenter', false);
 p.parse(m,pde,ic,bc,xmesh,t,varargin{:});
 %p.Results
 
@@ -95,6 +96,7 @@ pdeOpts.eqnDiagnosticsInitFunc = p.Results.eqnDiagnosticsInitFunc;
 pdeOpts.testFunctionDOFMap = p.Results.testFunctionDOFMap;
 pdeOpts.polyOrder = p.Results.PolyOrder;
 pdeOpts.odeSolver = p.Results.OdeSolver;
+pdeOpts.automaticBCAtCenter = p.Results.automaticBCAtCenter;
 
 if pdeOpts.polyOrder>1
   % add intermediate nodes for higher-order elems
