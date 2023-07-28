@@ -670,6 +670,36 @@ between the \pde and analytical solutions is very good.
 \end{figure} 
 
 \newpage
+\subsection{Melting of Ice}
+This example shows the melting of a semi-infinite ice slab. We have chosen the somewhat
+unrealistic semi-infinite case because it has a simple analytical solution that we will
+compare with. Most of what is learned in this example can be applied to more realistic
+solidification and melting problems and also problems where moving coordinate systems are 
+advantageous. 
+
+Problems of this type are often referred to as Stefan problems named after the physicist
+who studied melting and freezing in the 1800's. They are characterized by a moving ``front''
+that separates one material phase from the other. They are discussed in many publications
+including \cite{meltingFreezing}.
+
+The specific problem we will consider here is a slab of ice at zero degrees-C
+with a temperature of 25 degrees-C suddenly applied to the left ($x=0$) face. The
+extent of the block in the other directions is assumed to be large. This allows the
+use of a one-dimensional model of heat transfer and implies that the block never fully
+melts during the time of the simulation. We model only the liquid phase that initially 
+has length zero and lengthens as heat is transferred from the left edge into the ice. Such 
+a model is referred to as a one-phase Stefan model.
+
+A key parameter of such a model is the evolving location of the liquid-solid interface. 
+This is given by the Stefan equation, an ordinary differential equation that relates the
+heat flux in the ice of the velocity of the interface location:
+
+
+
+The complete listing of the \ml code for this example is shown below.
+\mylisting{meltingIce.m}
+
+\newpage
 \appendix
 \section{Appendix: Comparison Between \pde and \ml \pdepe} \label{sec:pdepe} 
 The types of PDE solved by \pde and \ml  {\tt pdepe} are similar. The input to \pde is
@@ -703,6 +733,10 @@ August 30, 1984.
 \bibitem{nagD03}
 \href{https://www.nag.co.uk/numeric/fl/manual/pdf/D03/d03phf.pdf}
 {NAG Fortran Library Routine Document D03PHF/D03PHA}.
+\bibitem{meltingFreezing}
+ Vasilios Alexiades and  Alan D. Solomon,
+ {\it Mathematical Modeling Of Melting And Freezing Processes},
+ (Taylor \& Francis), 1993.
 \end{thebibliography}
 
 \end{document}
