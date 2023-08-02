@@ -9,6 +9,8 @@
 \usepackage[dvipsnames]{xcolor}
 \usepackage{graphicx}
 %\usepackage{svg}
+\usepackage{amssymb}
+\usepackage{float}
 
 \addtolength{\hoffset}{-0.5in}
 \addtolength{\textwidth}{1in}
@@ -37,7 +39,7 @@
 
 \title{Solving Partial Differential Equations With the \pde Function and MATLAB/Octave}
 \author{Bill Greene}
-\date{Version 1.4, July 06, 2023}
+\date{Version 1.4, August 2, 2023}
 \maketitle
 
 \tableofcontents
@@ -670,6 +672,124 @@ between the \pde and analytical solutions is very good.
 \end{figure} 
 
 \newpage
+\subsection{Melting of Ice}
+This example shows the melting of a semi-infinite ice slab. We have chosen the somewhat
+unrealistic semi-infinite case because it has a simple analytical solution that we will
+compare with. Most of what is learned in this example can be applied to more realistic
+solidification and melting problems and also problems where moving coordinate systems are 
+advantageous. 
+
+Problems of this type are often referred to as Stefan problems named after the physicist
+who studied melting and freezing in the 1800's. They are characterized by a moving ``front''
+that separates one material phase from the other. They are discussed in many publications
+including \cite{meltingFreezing}.
+
+The specific problem we will consider here is a slab of ice at zero degrees-C
+with a temperature of 25 degrees-C suddenly applied to the left ($x=0$) face. The
+extent of the block in the other directions is assumed to be large. This allows the
+use of a one-dimensional model of heat transfer and implies that the block never fully
+melts during the time of the simulation. We model only the liquid phase that initially 
+has length zero and lengthens as heat is transferred from the left edge into the ice. Such 
+a model is referred to as a one-phase Stefan model.
+
+\subsubsection{Governing Equations}
+A key parameter of such a model is the evolving location of the liquid-solid interface. 
+This is given by the Stefan equation, an ordinary differential equation (ODE) that relates the
+heat flux in the ice to the velocity of the interface location:
+
+\begin{equation}\label{eq:stefan}
+	\rho l \frac{\partial X}{\partial t}=k\frac{\partial u}{\partial x}
+\end{equation}
+
+where $u$ is the temperature, $X$ is the front location, $\rho$ is the density,
+$l$ is the latent heat, and $k$ is the thermal conductivity. 
+
+This ODE is coupled to the classical partial differential equation (PDE) for heat
+conduction in the liquid.
+
+\begin{equation}\label{eq:head_cond_liquid}
+	\rho c \frac{\partial u}{\partial t} = 
+	\frac{\partial}{\partial x}\left(k \frac{\partial u}{\partial x}\right)
+\end{equation}
+where $c$ is the heat capacity of the fluid.
+
+\subsubsection{Moving Mesh}
+Because the analysis domain is continuously expanding as the analysis progresses it is
+necessary to move the mesh points at the same time. First, a parametric coordinate
+system is established that ranges from zero at the left end to one at the right end.
+Then, at any point in time the actual coordinates of any point in the domain can be
+defined as
+
+\begin{equation}\label{eq:moving_mesh_param_eqn}
+	x=\xi X(t)
+\end{equation}
+where $\xi$ is the parametric coordinate and $X$ is determined from the solution to the
+Stefan equation. We use this relation to rewrite the heat equation, accounting for the
+moving mesh, as follows
+
+\begin{equation}\label{eq:moving_mesh_heat_eqn}
+	x_\xi\frac{\partial u}{\partial t} = \left(\frac{k}{\rho c x_\xi}\frac{\partial u}{\partial\xi}\right)_\xi + 	
+	\frac{1}{x_\xi}\frac{\partial u}{\partial\xi}\frac{\partial x}{\partial t}
+\frac{}{}
+\end{equation}
+$\xi$ used as a subscript indicates partial differentiation, e.g. $x_\xi=\partial x/\xi$.
+
+
+\subsubsection{Implementation and Results }
+
+Equations \eqref{eq:stefan} and \eqref{eq:moving_mesh_heat_eqn} are coded in the
+functions \mycode{odeFunc} and \mycode{heatpde} respectively. A mesh is defined in
+parametric space
+
+\begin{lstlisting}
+	n=21;
+	% Define mesh in parametric space ranging from zero to one.
+	xi = linspace(0,1,n);
+\end{lstlisting}
+
+The PDE and ODE are coupled at the single point-- the right end of the
+computational domain.
+\begin{lstlisting}
+xOde = 1;
+\end{lstlisting}
+\pde passes $u$ and $\partial u/\partial\xi$ at this location as arguments to 
+\mycode{odeFunc} so they can be used in defining the Stefan equation.
+\pde also passes $X$ and $\partial X/\partial t$ as arguments to \mycode{heatpde}
+so they can be used to define the transformation from parametric to the actual
+coordinates.
+
+As mentioned above, a closed form analytic solution can be found for this simple
+melting problem. This solution can be found in section 2.1 of reference \cite{meltingFreezing}, for example. This is implemented in function
+\mycode{stefanOnePhaseAnalSoln}.
+
+The complete listing of the \ml code for this example is shown below.
+
+\mylisting{meltingIce.m}
+\bigskip
+
+This figure shows the progression of the melting location as a function of time.
+\begin{figure}[H]
+	\centering
+	\includegraphics[angle=0,
+	width=0.75\textwidth]{\exdir meltingFreezingFigure2}
+	\label{fig:meltingFreezingFigure2}
+\end{figure}
+As can be seen, the agreement between the \pde solution and the closed form
+solution is very good.
+
+This figure shows the temperature as a function of x-location in the
+liquid at the final analysis time (3600 seconds).
+\begin{figure}[H]
+	\centering
+	\includegraphics[angle=0,
+	width=0.75\textwidth]{\exdir meltingFreezingFigure1}
+	\label{fig:meltingFreezingFigure1}
+\end{figure}
+Agreement with the analytical solution is also quite good.
+
+
+
+\newpage
 \appendix
 \section{Appendix: Comparison Between \pde and \ml \pdepe} \label{sec:pdepe} 
 The types of PDE solved by \pde and \ml  {\tt pdepe} are similar. The input to \pde is
@@ -703,6 +823,10 @@ August 30, 1984.
 \bibitem{nagD03}
 \href{https://www.nag.co.uk/numeric/fl/manual/pdf/D03/d03phf.pdf}
 {NAG Fortran Library Routine Document D03PHF/D03PHA}.
+\bibitem{meltingFreezing}
+ Vasilios Alexiades and  Alan D. Solomon,
+ {\it Mathematical Modeling Of Melting And Freezing Processes},
+ (Taylor \& Francis), 1993.
 \end{thebibliography}
 
 \end{document}
