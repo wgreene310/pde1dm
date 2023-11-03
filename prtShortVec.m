@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-%   Copyright (C) 2016-2021 William H. Greene
+%   Copyright (C) 2016-2023 William H. Greene
 
 function prtShortVec( mat, title, fid, form, pruneTol)
 if(nargin < 3 || isempty(fid))
@@ -29,10 +29,10 @@ end
 
 mat = mat(:);
 n=length(mat);
-fprintf(fid, '%s(%d): ', title, n);
+fprintf(fid, '%s(1:%d)=[', title, n);
 for i=1:n
   fprintf(fid, form, mat(i));
 end
-fprintf(fid, '\n');
+fprintf(fid, '];\n');
 end
 
