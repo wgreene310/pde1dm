@@ -204,6 +204,7 @@ classdef PDE1dImpl < handle
 
         y0=self.y0;
         y0Save = y0;
+        yp0Save=yp0;
         if self.pdeOpts.cicMethod==1
           [y0,yp0]=decic(icf, t0,y0,fixed_y0,yp0,fixed_yp0,icopts);
         elseif self.pdeOpts.cicMethod==0
@@ -215,17 +216,26 @@ classdef PDE1dImpl < handle
           prtShortVec(self.xmesh, 'x');
           chgTol=max(icopts.RelTol*abs(self.y0), icopts.AbsTol);
           if 0
-          [maxChg, indMax] = max(abs(y0-y0Save));
-          fprintf('max change, y0=%g at equation %d\n', maxChg, indMax);
+            [maxChg, indMax] = max(abs(y0-y0Save));
+            fprintf('max change, y0=%g at equation %d\n', maxChg, indMax);
           end
           chgY = y0-y0Save;
-          chgI = abs(chgY) > chgTol;
-          prtShortVec(chgY(chgI), 'change in y0 values');
-          I=1:n;
-          prtShortVec(I(chgI), 'changed y0 equations');
-          prtShortVec(y0, 'y0');
-          prtShortVec(yp0, 'yp0', 1, '%16.8g');
-          prtShortVec(icf(t0,y0,yp0), 'res');
+
+          if self.hasODE
+            chgI = abs(chgY) > chgTol;
+            prtShortVec(chgY(chgI), 'change in y0 values');
+            I=1:n;
+            prtShortVec(I(chgI), 'changed y0 equations');
+            prtShortVec(y0, 'y0');
+            prtShortVec(yp0, 'yp0', 1, '%16.8g');
+            prtShortVec(icf(t0,y0,yp0), 'res');
+          else
+            R2 = @(v) reshape(v, self.numDepVars, []);
+            prtMat(R2(y0Save), 'y0 before decic', 1, '%.8g ');
+            prtMat(R2(yp0Save), 'yp0 before decic', 1, '%.8g ');
+            prtMat(R2(y0), 'y0 after decic', 1, '%.16g ');
+            prtMat(R2(yp0), 'yp0 after decic', 1, '%.16g ');
+          end
         end
       end
 
@@ -246,17 +256,18 @@ classdef PDE1dImpl < handle
       else
         % octave ode15i doesn't have JPattern option
         jPat = self.calcJacPattern;
-        opts=odeset(opts, 'jpattern', {jPat, jPat});
-      end
-
-      if(useOde15i)
-        [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
-      else
-        opts=odeset(opts,'initialslope', yp0);
-        opts=odeset(opts, 'Mass', massFunc);
-        [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
-      end
-      if self.hasODE
+	        opts=odeset(opts, 'jpattern', {jPat, jPat});
+	      end
+      
+	        if(useOde15i)
+	          [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
+	        else
+	          opts=odeset(opts,'initialslope', yp0);
+	          opts=odeset(opts, 'Mass', massFunc);
+	          [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
+	        end
+      
+	      if self.hasODE
         uOde = u(:,self.numFEMEqns+1:self.numFEMEqns+self.odeImpl.numODEVariables);
         varargout{1} = uOde;
         u= u(:,1:self.numFEMEqns);
