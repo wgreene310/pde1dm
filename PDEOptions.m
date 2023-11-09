@@ -29,6 +29,8 @@ classdef PDEOptions
     polyOrder;
     odeSolver, cicMethod, cicAbsTol, cicRelTol;
     automaticBCAtCenter;
+    diagnosticPrint;
+    numberMPCycles;
   end
   
   methods
@@ -55,6 +57,8 @@ classdef PDEOptions
       obj.cicRelTol=[];
       obj.odeSolver = 0;
       obj.automaticBCAtCenter=false;
+      obj.diagnosticPrint=0;
+      obj.numberMPCycles=0;
     end
   end
 end

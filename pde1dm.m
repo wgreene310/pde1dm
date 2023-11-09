@@ -76,6 +76,8 @@ p.addParameter('eqnDiagnosticsInitFunc', [], validInitFunc);
 validDOFMap = @(x) all(isfinite(x) & x==floor(x) & x>0);
 p.addParameter('testFunctionDOFMap', [], validDOFMap);
 p.addParameter('automaticBCAtCenter', false);
+p.addParameter('diagnosticPrint', 0);
+p.addParameter('numberMPCycles',0, @validPosInt);
 p.parse(m,pde,ic,bc,xmesh,t,varargin{:});
 %p.Results
 
@@ -97,6 +99,8 @@ pdeOpts.testFunctionDOFMap = p.Results.testFunctionDOFMap;
 pdeOpts.polyOrder = p.Results.PolyOrder;
 pdeOpts.odeSolver = p.Results.OdeSolver;
 pdeOpts.automaticBCAtCenter = p.Results.automaticBCAtCenter;
+pdeOpts.diagnosticPrint = p.Results.diagnosticPrint;
+pdeOpts.numberMPCycles = p.Results.numberMPCycles;
 
 if pdeOpts.polyOrder>1
   % add intermediate nodes for higher-order elems
@@ -149,6 +153,13 @@ nt=size(u, 1);
 sol = zeros(nt, nx, npde);
 for i = 1:npde
   sol(:,:,i) = u(:,i:npde:end-npde+i);
+end
+end
+
+function valid=validPosInt(m)
+valid = isscalar(m) && isreal(m) && ~mod(m,1) && m>=0;
+if(~valid)
+  error('pde1d:invalid_positive_int', 'Not a positive integer.');
 end
 end
 
