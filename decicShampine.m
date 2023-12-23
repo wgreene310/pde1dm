@@ -1,19 +1,19 @@
-%  
+%
 %   This library is free software; you can redistribute it and/or
 %   modify it under the terms of the GNU General Public License
 %   as published by the Free Software Foundation; either version 3
 %   of the License, or (at your option) any later version.
-%  
+%
 %   This library is distributed in the hope that it will be useful,
 %   but WITHOUT ANY WARRANTY; without even the implied warranty of
 %   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
 %   General Public License for more details.
-%  
+%
 %   You should have received a copy of the GNU General Public License
 %   along with this library; if not, visit
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
-% 
+%
 % Copyright (C) 2016-2021 William H. Greene
 
 function [y0_new, yp0_new, resnrm] = decicShampine (odefun, t0, y0, fixed_y0, yp0, ...
@@ -49,6 +49,9 @@ absTol=p.Results.AbsTol;
 maxIter=p.Results.MaxIter;
 icdiag = p.Results.ICDiagnostics;
 haveJac = 0;
+if icdiag
+  fprintf('decic: AbsTol=%g, RelTol=%g\n', absTol, relTol);
+end
 
 jac = p.Results.Jacobian;
 if(~isempty(jac))
@@ -89,13 +92,10 @@ it = 0;
 y0_new = y0; yp0_new = yp0;
 res0=odefun(t0,y0, yp0);
 resTol=max(relTol*abs(res0), absTol);
-if icdiag
-  fprintf('decic: AbsTol=%g, RelTol=%g\n', absTol, relTol);
+if icdiag>1
   prtShortVec(y0, 'y0');
   prtShortVec(yp0, 'yp0');
   prtShortVec(res0, 'res0');
-end
-if icdiag>1
   prtShortVec(fixed_y0, 'fixed_y0');
   prtShortVec(fixed_yp0, 'fixed_yp0');
 end
@@ -104,7 +104,7 @@ while(it <= maxIter)
   res = odefun(t0,y0_new, yp0_new);
   resnrm=norm(res);
   maxRes=norm(res,inf);
-  if(icdiag > 1)
+  if(icdiag>1)
     fprintf('iteration=%d, maxres=%12.3e, maxDeltaY=%12.3e, maxDeltaYp=%12.3e\n', ...
       it, maxRes, maxDeltaY, maxDeltaYp);
   end
@@ -115,7 +115,7 @@ while(it <= maxIter)
     return;
   end
   res=res(:);
-  
+
   if(haveJac == 0)
     % calculate by forward difference
     if(anyFreeY0)
@@ -132,12 +132,12 @@ while(it <= maxIter)
     [dfDy, dfDyp] = options.Jacobian(t0, y0_new, yp0_new);
     checkJacSize(dfDy, dfDyp, n);
   end
-  
+
   % remove columns for the components of yp0 that are fixed
   dfDyp = dfDyp(:, free_yp0);
   % remove columns for the components of y0 that are fixed
   dfDy = dfDy(:, free_y0);
-  
+
   if (~anyFreeY0)
     % must do QR on full matrix to get full rank-revealing algorithm
     [Q,R,E] = qr(full(dfDyp));
@@ -155,8 +155,13 @@ while(it <= maxIter)
   else
     % must do QR on full matrix to get full rank-revealing algorithm
     [Q,R,E] = qr(full(dfDyp));
-    algdofs = abs(diag(R))<100*eps;
-    %algdofs'
+    algdofs = abs(diag(R))<zeroTol(R);
+    if icdiag>2
+    %fprintf('#$ num algdofs=%d\n', sum(algdofs));
+    prtShortVec(find(algdofs), '# algdofs: ');
+    dr=diag(R);
+    prtShortVec(dr(algdofs), '# diag(R): ', 1, '%12.2e ');
+    end
     anyAlgDofs = any(algdofs);
     difdofs=~algdofs;
     R11 = R(difdofs, difdofs);
@@ -253,19 +258,13 @@ end
 
 function rank=rankR(R)
 adr=abs(diag(R));
-tol=eps*max(adr);
+tol=zeroTol(R);
 rank=nnz(adr>tol);
 end
 
-function value = getfieldi(S,field)
-names   = fieldnames(S);
-isField = strcmpi(field,names);
-
-if any(isField)
-  value = S.(names{isField});
-else
-  value = [];
-end
+function tol=zeroTol(a)
+adr=abs(diag(a));
+tol=1e6*eps*max(adr);
 end
 
 function checkLen(n, x)
