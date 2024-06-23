@@ -24,8 +24,6 @@ if(~ismember(nargin,[6 7 9 10]))
 end
 hasODE = nargin > 7;
 
-isOctave = exist('OCTAVE_VERSION', 'builtin');
-
 p=inputParser;
 validOnOff = @(x) any(validatestring(x,{'on','off'}));
 p.addRequired('m', @validM);
@@ -54,19 +52,11 @@ p.addParameter('cicMethod', 0);
 p.addParameter('cicAbsTol', []);
 p.addParameter('cicRelTol', []);
 p.addParameter('ICDiagnostics', 0);
-if isOctave
-  validPolyOrder=@(n) isscalar(n) && ~mod(n,1) && n>=1 && n<=3;
-else
-  validPolyOrder=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1, '<=', 3});
-end
+validPolyOrder=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1, '<=', 3});
 p.addParameter('PolyOrder', 1, validPolyOrder);
 p.addParameter('ViewMesh', 1);
 p.addParameter('DiagonalMassMatrix', 'off', validOnOff);
-if isOctave
-  validPts=@(n) isscalar(n) && ~mod(n,1) && n>0;
-else
-  validPts=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1});
-end
+validPts=@(n) validateattributes(n, {'numeric'}, {'scalar', 'integer', '>=', 1});
 p.addParameter('NumIntegrationPoints', [], validPts);
 p.addParameter('AnalyticalJacobian', 'off', validOnOff);
 validInitSlope= @(x) isnumeric(x) || validHandle(x);
@@ -116,6 +106,7 @@ else
 end
 
 
+varargout={};
 if(~eqnDiagnostics)
   odeOpts=odeset('RelTol', p.Results.RelTol, ...
     'AbsTol', p.Results.AbsTol, ...
@@ -123,11 +114,9 @@ if(~eqnDiagnostics)
     'BDF', p.Results.BDF, ...
     'MaxOrder', p.Results.MaxOrder, ...
     'MaxStep', p.Results.MaxStep);
-  if(hasODE)
-    [u,uODE] = pdeImpl.solveTransient(odeOpts);
-    varargout{1} = uODE;
-  else
-    u = pdeImpl.solveTransient(odeOpts);
+  [u,va] = pdeImpl.solveTransient(odeOpts);
+  if ~isempty(va)
+    varargout = va;
   end
   npde=pdeImpl.numDepVars;
   if(npde==1)
@@ -137,8 +126,6 @@ if(~eqnDiagnostics)
   end
   if pdeOpts.polyOrder>1
     % solution on the original mesh
-    nt=size(u, 1);
-    %sol
     sol=sol(:,1:pdeOpts.polyOrder:end,:);
   end
 else

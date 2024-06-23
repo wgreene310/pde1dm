@@ -40,7 +40,6 @@ classdef PDE1dImpl < handle
 		obj.icFunc = icFunc;
 		obj.bcFunc = bcFunc;
     x=x(:)';
-		obj.xmesh = x;
     obj.numNodes = length(x);
     t=t(:)';
 		obj.tspan = t;
@@ -65,16 +64,9 @@ classdef PDE1dImpl < handle
     obj.icDiagnostics = opts.icDiagnostics;
     obj.eqnDiagnostics = opts.eqnDiagnostics;
     obj.analyticalJacobian = opts.analyticalJacobian;
-
-    obj.y0FEM = zeros(obj.numDepVars, obj.numNodes);
-    for i=1:obj.numNodes
-      obj.y0FEM(:,i) = icFunc(x(i));
-    end
-    obj.y0 = obj.y0FEM(:);
-
+    % FIXME!! numNodes has to be calculated carefully for this to work
+    % if polyorder>1!!
     obj.numElems=(obj.numNodes-1)/(obj.numElemNodes-1);
-    numXpts = obj.numElems*obj.numIntegrationPoints;
-    % calc xpts for the mesh
     gPts = obj.intRule.points;
     if obj.numElemNodes==2
       obj.sF =  @obj.shapeLine2;
@@ -94,21 +86,21 @@ classdef PDE1dImpl < handle
     else
       error('Unsupported number of element nodes.');
     end
-    x = obj.xmesh;
-    obj.xPts=zeros(1, numXpts);
+    
+    obj.y0FEM = zeros(obj.numDepVars, obj.numNodes);
+    for i=1:obj.numNodes
+      obj.y0FEM(:,i) = icFunc(x(i));
+    end
+    obj.y0 = obj.y0FEM(:);
+    obj.setMesh(x);
+    
     obj.NN = zeros(obj.numElemNodes, obj.numElemNodes, obj.numIntegrationPoints);
-    ip = 1:obj.numIntegrationPoints:numXpts;
     for i=1:obj.numIntegrationPoints
       obj.NN(:,:,i) = obj.N(:,i)*obj.N(:,i)';
-      for j=1:obj.numElemNodes
-        jj=obj.numElemNodes-j;
-        obj.xPts(ip) = obj.xPts(ip) + x(j:obj.numElemNodes-1:end-jj)*obj.N(j,i);
-      end
-      ip = ip + 1;
     end
-
+    
     obj.isOctave = exist('OCTAVE_VERSION', 'builtin');
-
+    
     if obj.hasODE
       obj.setODE(odeFunc, odeICFunc, odeMesh);
     end
@@ -116,7 +108,7 @@ classdef PDE1dImpl < handle
     end
 
 
-    function [u,varargout]=solveTransient(self, odeOpts)
+    function [u,outArgs]=solveTransient(self, odeOpts)
 
       reltol=odeOpts.RelTol;
       abstol=odeOpts.AbsTol;
@@ -231,10 +223,11 @@ classdef PDE1dImpl < handle
             prtShortVec(icf(t0,y0,yp0), 'res');
           else
             R2 = @(v) reshape(v, self.numDepVars, []);
-            prtMat(R2(y0Save), 'y0 before decic', 1, '%.8g ');
-            prtMat(R2(yp0Save), 'yp0 before decic', 1, '%.8g ');
-            prtMat(R2(y0), 'y0 after decic', 1, '%.16g ');
-            prtMat(R2(yp0), 'yp0 after decic', 1, '%.16g ');
+            form='%.6g ';
+            prtMat(R2(y0Save), 'y0 before decic', 1, form);
+            prtMat(R2(yp0Save), 'yp0 before decic', 1, form);
+            prtMat(R2(y0), 'y0 after decic', 1, form);
+            prtMat(R2(yp0), 'yp0 after decic', 1, form);
           end
         end
       end
@@ -257,19 +250,24 @@ classdef PDE1dImpl < handle
         % octave ode15i doesn't have JPattern option
         jPat = self.calcJacPattern;
 	        opts=odeset(opts, 'jpattern', {jPat, jPat});
-	      end
+      end
+      outArgs={};
+      if self.pdeOpts.numberMPCycles
+        [u,va]=solveMP(self, icf, self.tspan, y0, yp0, opts);
+        outArgs=va;
+      else
+        if(useOde15i)
+          [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
+        else
+          opts=odeset(opts,'initialslope', yp0);
+          opts=odeset(opts, 'Mass', massFunc);
+          [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
+        end
+      end
       
-	        if(useOde15i)
-	          [outTimes,u]=ode15i(icf, self.tspan, y0, yp0, opts);
-	        else
-	          opts=odeset(opts,'initialslope', yp0);
-	          opts=odeset(opts, 'Mass', massFunc);
-	          [outTimes,u]=ode15s(rhsFunc, self.tspan, y0, opts);
-	        end
-      
-	      if self.hasODE
+      if self.hasODE
         uOde = u(:,self.numFEMEqns+1:self.numFEMEqns+self.odeImpl.numODEVariables);
-        varargout{1} = uOde;
+        outArgs{end+1} = uOde;
         u= u(:,1:self.numFEMEqns);
       end
     end
@@ -392,8 +390,6 @@ classdef PDE1dImpl < handle
       self.printSystemVector(Cxd, 'Cxd', 1, '%16.8e');
       self.printSystemVector(S-F, 'S-F', 1, '%16.8e');
       self.printSystemVector(S-F+Cxd, 'S-F+Cxd', 1, '%16.8e');
-      self.printSystemVector(S-F-Cxd, 'S-F-Cxd', 1, '%16.8e');
-      self.printSystemVector(Cxd+S-F, 'Cxd+S-F', 1, '%16.8e');
       if(self.eqnDiagnostics>1)
         K = self.calcJacobian(0, u, up);
         prtMat(K, 'K', 1, '%13g');
@@ -420,7 +416,7 @@ classdef PDE1dImpl < handle
     end
 
     function R = calcResidual(self, time, u, up, depVarClassType)
-      if nargin<4
+      if nargin<5
         depVarClassType=u;
       end
       [rhs,Cxd] = calcRHS(self, time, u, up, depVarClassType);
@@ -868,6 +864,91 @@ classdef PDE1dImpl < handle
         bcErrMsg = 'Size of "%s" must be %d X 1';
         error('pde1d:bcSize', bcErrMsg, bcName, sb(1));
       end
+    end
+    
+    function setMesh(self, x)
+      x=x(:)';
+      self.xmesh = x;
+      numXpts = self.numElems*self.numIntegrationPoints;
+      self.xPts=zeros(1, numXpts);
+      ip = 1:self.numIntegrationPoints:numXpts;     
+      for i=1:self.numIntegrationPoints
+        for j=1:self.numElemNodes
+
+          jj=self.numElemNodes-j;
+          self.xPts(ip) = self.xPts(ip) + x(j:self.numElemNodes-1:end-jj)*self.N(j,i);
+        end
+        ip = ip + 1;
+      end
+    end
+    
+    function [u,outArgs]=solveMP(self, icf, tspan, y0, yp0, opts)
+      nfe=self.numFEMEqns; 
+     
+      monitor=3;
+      mmpde=5;
+      tau=1;
+      % FIXME need some rational way to calculate tspan
+      tspanX=[0 1];
+      
+      ntOutput=length(tspan);
+      tne=length(y0);
+      uOutput=zeros(ntOutput,tne);
+      xOutput=zeros(ntOutput,nfe);
+      t=tspan(1);
+      tfinal=tspan(end);
+      dt=(tfinal-t)/(self.pdeOpts.numberMPCycles-1);
+      xIm1=self.xmesh(:);
+      xtIm1=0*xIm1; 
+      yI=y0;     
+      ypI=yp0;
+      while(t<tfinal)
+        % move nodes
+        y2FEM=self.femU2FromSysVec(yI);
+        yp2FEM=self.femU2FromSysVec(ypI);
+        rho = meshDensityFunc(xIm1,y2FEM);
+        odefun=@(t,x,xt) mmPDEResidual(monitor,mmpde,tau,x,xt,rho);
+        solX=ode15i(odefun, tspanX, xIm1, xtIm1);
+        % adjust tspan if necessary
+        maxDx= max(abs(solX.x(end)-solX.x(end-1)));
+        [xI,xtI]=deval(solX,solX.x(end));
+        if 0         
+        else
+          y2FEMI = interp1(xIm1, y2FEM, xI, 'linear',  'extrap' );
+          yp2FEMI = interp1(xIm1, yp2FEM, xI, 'linear',  'extrap' );
+          yI(1:nfe)=y2FEMI(:);
+          ypI(1:nfe)=yp2FEMI(:);
+          self.setMesh(xI);
+          if self.hasODE
+            self.odeImpl.updateSrcMesh(xI);
+          end
+        end
+        
+        xIm1=xI;
+        xtIm1=xtI;
+        
+        % solve the system of pde on new mesh
+        tNew=t+dt;
+        tsI=[t tNew];
+        sol=ode15i(icf, tsI, yI, ypI, opts);
+        tSol=sol.x(end);
+        [yI,ypI]=deval(sol,tSol);
+        if tSol>t
+          tNew=tSol;
+        else
+          error('pde integration failed at t=%g', t);
+        end
+        toSave=tspan>=t & tspan<=tNew;
+        numToSave=sum(toSave);
+        if numToSave
+          uOutput(toSave,:)=deval(sol,tspan(toSave))';
+          xOutput(toSave,:)=repmat(xI', numToSave,1);
+        end
+        t=tNew;
+      end
+      
+      u=uOutput;
+      outArgs= {xOutput};
     end
 
 	end % methods
