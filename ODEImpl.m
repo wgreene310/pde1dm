@@ -14,7 +14,7 @@
 %   http://www.gnu.org/licenses/gpl.html or write to the Free Software
 %   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307, USA.
 % 
-% Copyright (C) 2020-2021 William H. Greene
+% Copyright (C) 2020-2024 William H. Greene
 
 classdef ODEImpl
   
@@ -102,6 +102,10 @@ classdef ODEImpl
         tfi = repmat(testFunctionDOFMap(:), 1, numFEMNodes) + ii;
         obj.testFunctionIndex = tfi(:);
       end
+    end
+    
+    function updateSrcMesh(self, srcMesh)
+      self.meshMapper.setSrcMesh(srcMesh);
     end
     
     function [R,Rdot]=updateResiduals(self, time, u, up, ...
