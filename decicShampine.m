@@ -132,6 +132,11 @@ while(it <= maxIter)
     [dfDy, dfDyp] = options.Jacobian(t0, y0_new, yp0_new);
     checkJacSize(dfDy, dfDyp, n);
   end
+  
+  if(icdiag > 3)
+    prtMat(full(dfDy), 'dfDy');
+    prtMat(full(dfDyp), 'dfDyp');
+  end
 
   % remove columns for the components of yp0 that are fixed
   dfDyp = dfDyp(:, free_yp0);
@@ -166,15 +171,28 @@ while(it <= maxIter)
     difdofs=~algdofs;
     R11 = R(difdofs, difdofs);
     %rank(R11)
+    % from shampine eqn (7)
     d = -Q'*res;
     S = Q'*dfDy;
     if(anyAlgDofs)
+      % from shampine eqn (8)
       S2122 = S(algdofs,:);
       %S2122
-      if(0)
+      if 0
         w=S2122\d(algdofs);
+      elseif 0
+        w=pinv(S2122)*d(algdofs);
+      elseif 0
+        w=lsqminnorm(S2122, d(algdofs));
+      elseif 1
+        w=solveQR(S2122, d(algdofs));
       else
         [Qs,Rs,Es] = qr(S2122);
+        if(icdiag > 3)
+          prtMat(Qs, 'Qs');
+          prtMat(Rs, 'Rs');
+          prtMat(Es, 'Es');
+        end
         numAlg = size(Rs,1);
         rankRs=rankR(Rs);
         if rankRs < numAlg
@@ -184,11 +202,6 @@ while(it <= maxIter)
           return;
         end
         w = Es*(Rs\(Qs'*d(algdofs)));
-        if(icdiag > 3)
-          prtMat(Qs, 'Qs');
-          prtMat(Rs, 'Rs');
-          prtMat(Es, 'Es');
-        end
       end
       if(icdiag > 2)
         prtShortVec(w, 'w');
@@ -274,3 +287,13 @@ if(length(x) ~= n)
 end
 end
 
+function u=solveQR(A,b)
+[Q,R,P]=qr(A);
+r=rank(R);
+[m,n]=size(A);
+%fprintf('m=%d, n=%d, rank=%d\n', m, n, r);
+rr=1:r;
+rhs=Q'*b;
+z=R(rr,rr)\rhs(rr);
+u=P*[z;zeros(n-r,1)];
+end
